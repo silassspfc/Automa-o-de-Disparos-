@@ -36,7 +36,10 @@ def _send(number: str, body: str):
         "externalKey": str(uuid.uuid4()),
         "isClosed": False
     }
+    print(f"[API] POST {BASE_URL}")
+    print(f"[API] Payload: {payload}")
     response = requests.post(BASE_URL, json=payload, headers=HEADERS, timeout=10)
+    print(f"[API] Status: {response.status_code} | Response: {response.text}")
     response.raise_for_status()
     return response.json()
 
