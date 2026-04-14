@@ -1,4 +1,5 @@
 import os
+import uuid
 import requests
 from dotenv import load_dotenv
 
@@ -32,7 +33,7 @@ def _send(number: str, body: str):
     payload = {
         "body": body,
         "number": number,
-        "externalKey": SECRET_KEY,
+        "externalKey": str(uuid.uuid4()),
         "isClosed": False
     }
     response = requests.post(BASE_URL, json=payload, headers=HEADERS, timeout=10)
