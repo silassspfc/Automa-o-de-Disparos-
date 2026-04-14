@@ -32,7 +32,8 @@ def _send(number: str, body: str):
     payload = {
         "body": body,
         "number": number,
-        "externalKey": SECRET_KEY
+        "externalKey": SECRET_KEY,
+        "isClosed": False
     }
     response = requests.post(BASE_URL, json=payload, headers=HEADERS, timeout=10)
     response.raise_for_status()
