@@ -2,18 +2,10 @@ import os
 import re
 from flask import Flask, request, jsonify
 from datetime import datetime, timezone
-from apscheduler.schedulers.background import BackgroundScheduler
 from services.supabase_client import client
-from services.whatsapp import send_reminder
-from jobs.scheduler import check_and_send_reports
+from services.whatsapp import send_reminder, send_report
 
 app = Flask(__name__)
-
-# Inicia o scheduler ao subir a aplicação
-# Apenas o relatório é automático (3 dias antes do evento, todo dia às 09h)
-scheduler = BackgroundScheduler(timezone="America/Sao_Paulo")
-scheduler.add_job(check_and_send_reports, "cron", hour=9, minute=0)
-scheduler.start()
 
 LOCAL_EVENTO = os.getenv("LOCAL_EVENTO", "")
 
@@ -144,6 +136,66 @@ def disparar():
             print(f"[ERRO] Falha ao enviar para {reminder['nome']}: {e}")
 
     return jsonify({"ok": True, "enviados": enviados, "erros": erros}), 200
+
+
+@app.route("/relatorio", methods=["GET"])
+def relatorio():
+    """Disparo manual do relatório de confirmações para uma data de evento."""
+    data_ev = request.args.get("data_evento", "").strip()
+
+    if not data_ev:
+        return jsonify({"error": "Informe o parâmetro data_evento (ex: /relatorio?data_evento=2026-05-10)"}), 400
+
+    result = (
+        client.table("reminders")
+        .select("*")
+        .eq("data_evento", data_ev)
+        .execute()
+    )
+
+    if not result.data:
+        return jsonify({"ok": True, "msg": "Nenhum inscrito encontrado para essa data"}), 200
+
+    # Agrupa por evento (unidade + data)
+    eventos = {}
+    for reminder in result.data:
+        chave = (reminder["unidade"], reminder["data_evento"])
+        if chave not in eventos:
+            eventos[chave] = {"confirmados": [], "recusados": [], "sem_resposta": [], "ids": []}
+
+        if reminder["status"] == "confirmed":
+            eventos[chave]["confirmados"].append(reminder["nome"])
+        elif reminder["status"] == "declined":
+            eventos[chave]["recusados"].append(reminder["nome"])
+        else:
+            eventos[chave]["sem_resposta"].append(reminder["nome"])
+
+        eventos[chave]["ids"].append(reminder["id"])
+
+    enviados, erros = 0, []
+
+    for (unidade, data), grupos in eventos.items():
+        try:
+            send_report(
+                unidade=unidade,
+                data=data,
+                confirmados=grupos["confirmados"],
+                recusados=grupos["recusados"],
+                sem_resposta=grupos["sem_resposta"]
+            )
+
+            for reminder_id in grupos["ids"]:
+                client.table("reminders").update({
+                    "report_sent": True
+                }).eq("id", reminder_id).execute()
+
+            enviados += 1
+            print(f"[RELATORIO] Enviado para evento {unidade} em {data}")
+        except Exception as e:
+            erros.append(unidade)
+            print(f"[ERRO] Falha ao enviar relatório para {unidade} em {data}: {e}")
+
+    return jsonify({"ok": True, "relatorios_enviados": enviados, "erros": erros}), 200
 
 
 @app.route("/health", methods=["GET"])
