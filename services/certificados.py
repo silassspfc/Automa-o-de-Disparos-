@@ -96,7 +96,7 @@ def _enviar_email(destinatario: str, nome: str, treinamento: str, pdf_bytes: byt
     parte.add_header("Content-Disposition", f'attachment; filename="{nome_arquivo}"')
     msg.attach(parte)
 
-    with smtplib.SMTP("smtp.office365.com", 587) as s:
+    with smtplib.SMTP("smtp.office365.com", 587, timeout=30) as s:
         s.starttls()
         s.login(EMAIL_REMETENTE, EMAIL_SENHA)
         s.sendmail(EMAIL_REMETENTE, destinatario, msg.as_string())
