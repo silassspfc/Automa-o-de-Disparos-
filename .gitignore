@@ -3,4 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 onodera-backend/
-projeto/
+projeto/.venv/
+projeto/__pycache__/
+projeto/logs/
+projeto/certificados/
