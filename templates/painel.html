@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Disparos — Onodera</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #222; }
+
+    header { background: #1a1a2e; color: white; padding: 20px 32px; }
+    header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.5px; }
+    header p { font-size: 0.8rem; opacity: 0.6; margin-top: 2px; }
+
+    main { max-width: 860px; margin: 32px auto; padding: 0 16px; }
+
+    .card { background: white; border-radius: 10px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .card h2 { font-size: 0.95rem; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+
+    .busca { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+    .busca label { font-size: 0.85rem; color: #666; display: block; margin-bottom: 6px; }
+    .busca input[type="date"] { padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.95rem; outline: none; }
+    .busca input[type="date"]:focus { border-color: #1a1a2e; }
+
+    .btn { padding: 10px 22px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #1a1a2e; color: white; }
+    .btn-green  { background: #16a34a; color: white; }
+    .btn-blue   { background: #2563eb; color: white; }
+
+    #preview { display: none; }
+
+    .resumo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 4px; }
+    @media (max-width: 600px) { .resumo-grid { grid-template-columns: 1fr; } }
+
+    .bloco { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
+    .bloco h3 { font-size: 0.85rem; font-weight: 600; color: #444; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .bloco h3 span.badge { background: #f3f4f6; color: #333; font-size: 0.75rem; padding: 2px 8px; border-radius: 20px; }
+    .bloco ul { list-style: none; padding: 0; }
+    .bloco ul li { font-size: 0.85rem; padding: 5px 0; border-bottom: 1px solid #f3f4f6; color: #444; }
+    .bloco ul li:last-child { border-bottom: none; }
+
+    .pill { display: inline-block; font-size: 0.72rem; padding: 2px 7px; border-radius: 20px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+    .pill-green  { background: #dcfce7; color: #16a34a; }
+    .pill-red    { background: #fee2e2; color: #dc2626; }
+    .pill-gray   { background: #f3f4f6; color: #6b7280; }
+
+    .acoes { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+
+    .alerta { background: #fef9c3; border: 1px solid #fde047; border-radius: 8px; padding: 12px 16px; font-size: 0.85rem; color: #713f12; margin-top: 12px; display: none; }
+    .sucesso { background: #dcfce7; border: 1px solid #86efac; border-radius: 8px; padding: 12px 16px; font-size: 0.85rem; color: #14532d; margin-top: 12px; display: none; }
+    .erro    { background: #fee2e2; border: 1px solid #fca5a5; border-radius: 8px; padding: 12px 16px; font-size: 0.85rem; color: #7f1d1d; margin-top: 12px; display: none; }
+
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .vazio { color: #9ca3af; font-size: 0.85rem; font-style: italic; padding: 8px 0; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Painel de Disparos — Onodera</h1>
+  <p>Selecione a data do evento para visualizar e disparar</p>
+</header>
+
+<main>
+
+  <!-- Busca -->
+  <div class="card">
+    <h2>Data do Evento</h2>
+    <div class="busca">
+      <div>
+        <label for="data">Data do evento</label>
+        <input type="date" id="data">
+      </div>
+      <button class="btn btn-primary" onclick="buscar()">Buscar</button>
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div id="preview">
+
+    <!-- Bloco: Disparar confirmações -->
+    <div class="card">
+      <h2>Confirmações a Disparar</h2>
+      <p style="font-size:0.83rem;color:#666;margin-bottom:16px;">
+        Serão enviadas mensagens para os <strong>responsáveis</strong> das unidades com inscritos ainda <em>pendentes</em>.
+      </p>
+      <div id="lista-pendentes" class="resumo-grid"></div>
+      <div id="alerta-disparar" class="alerta"></div>
+      <div id="sucesso-disparar" class="sucesso"></div>
+      <div id="erro-disparar" class="erro"></div>
+      <div class="acoes">
+        <button id="btn-disparar" class="btn btn-green" onclick="disparar()">Disparar confirmações</button>
+      </div>
+    </div>
+
+    <!-- Bloco: Relatório -->
+    <div class="card">
+      <h2>Relatório de Respostas</h2>
+      <p style="font-size:0.83rem;color:#666;margin-bottom:16px;">
+        Resumo das respostas recebidas até agora. O relatório será enviado para o número do organizador.
+      </p>
+      <div id="lista-relatorio" class="resumo-grid"></div>
+      <div id="alerta-relatorio" class="alerta"></div>
+      <div id="sucesso-relatorio" class="sucesso"></div>
+      <div id="erro-relatorio" class="erro"></div>
+      <div class="acoes">
+        <button id="btn-relatorio" class="btn btn-blue" onclick="enviarRelatorio()">Enviar relatório</button>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<script>
+  let dataAtual = "";
+
+  function getDataStr() {
+    return document.getElementById("data").value;
+  }
+
+  async function buscar() {
+    const data = getDataStr();
+    if (!data) { alert("Selecione uma data."); return; }
+    dataAtual = data;
+
+    ocultarMensagens();
+    document.getElementById("preview").style.display = "none";
+
+    const res = await fetch(`/preview?data_evento=${data}`);
+    const json = await res.json();
+
+    renderPendentes(json.pendentes);
+    renderRelatorio(json.respostas);
+
+    document.getElementById("preview").style.display = "block";
+  }
+
+  function renderPendentes(unidades) {
+    const el = document.getElementById("lista-pendentes");
+    const btn = document.getElementById("btn-disparar");
+
+    if (!unidades || unidades.length === 0) {
+      el.innerHTML = '<p class="vazio">Nenhum inscrito pendente para essa data.</p>';
+      btn.disabled = true;
+      return;
+    }
+
+    btn.disabled = false;
+    el.innerHTML = unidades.map(u => `
+      <div class="bloco">
+        <h3>${u.unidade} <span class="badge">${u.pessoas.length} pessoa(s)</span></h3>
+        <ul>${u.pessoas.map(p => `<li>${p}</li>`).join("")}</ul>
+      </div>
+    `).join("");
+  }
+
+  function renderRelatorio(unidades) {
+    const el = document.getElementById("lista-relatorio");
+    const btn = document.getElementById("btn-relatorio");
+
+    if (!unidades || unidades.length === 0) {
+      el.innerHTML = '<p class="vazio">Nenhum inscrito encontrado para essa data.</p>';
+      btn.disabled = true;
+      return;
+    }
+
+    btn.disabled = false;
+    el.innerHTML = unidades.map(u => `
+      <div class="bloco">
+        <h3>${u.unidade}</h3>
+        <ul>
+          ${u.confirmados.map(p => `<li>${p} <span class="pill pill-green">SIM</span></li>`).join("")}
+          ${u.recusados.map(p => `<li>${p} <span class="pill pill-red">NÃO</span></li>`).join("")}
+          ${u.sem_resposta.map(p => `<li>${p} <span class="pill pill-gray">sem resposta</span></li>`).join("")}
+        </ul>
+      </div>
+    `).join("");
+  }
+
+  async function disparar() {
+    const data = dataAtual;
+    const btn = document.getElementById("btn-disparar");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Enviando...';
+
+    const res = await fetch(`/disparar?data_evento=${data}`);
+    const json = await res.json();
+
+    btn.innerHTML = "Disparar confirmações";
+
+    if (json.ok) {
+      const el = document.getElementById("sucesso-disparar");
+      el.style.display = "block";
+      el.textContent = `${json.enviados} mensagem(ns) enviada(s) com sucesso.` +
+        (json.erros?.length ? ` Falha: ${json.erros.join(", ")}.` : "");
+      await buscar();
+    } else {
+      mostrarErro("erro-disparar", "Erro ao disparar. Tente novamente.");
+      btn.disabled = false;
+    }
+  }
+
+  async function enviarRelatorio() {
+    const data = dataAtual;
+    const btn = document.getElementById("btn-relatorio");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Enviando...';
+
+    const res = await fetch(`/relatorio?data_evento=${data}`);
+    const json = await res.json();
+
+    btn.innerHTML = "Enviar relatório";
+
+    if (json.ok) {
+      const el = document.getElementById("sucesso-relatorio");
+      el.style.display = "block";
+      el.textContent = `Relatório enviado para o organizador.` +
+        (json.erros?.length ? ` Falha: ${json.erros.join(", ")}.` : "");
+    } else {
+      mostrarErro("erro-relatorio", "Erro ao enviar relatório. Tente novamente.");
+      btn.disabled = false;
+    }
+  }
+
+  function ocultarMensagens() {
+    ["alerta-disparar","sucesso-disparar","erro-disparar",
+     "alerta-relatorio","sucesso-relatorio","erro-relatorio"].forEach(id => {
+      document.getElementById(id).style.display = "none";
+    });
+  }
+
+  function mostrarErro(id, msg) {
+    const el = document.getElementById(id);
+    el.style.display = "block";
+    el.textContent = msg;
+  }
+</script>
+
+</body>
+</html>

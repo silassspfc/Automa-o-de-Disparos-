@@ -1,6 +1,6 @@
 import os
 import re
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from datetime import datetime, timezone
 from services.supabase_client import client
 from services.whatsapp import send_reminder, send_report
@@ -196,6 +196,57 @@ def relatorio():
             print(f"[ERRO] Falha ao enviar relatório para {unidade} em {data}: {e}")
 
     return jsonify({"ok": True, "relatorios_enviados": enviados, "erros": erros}), 200
+
+
+@app.route("/painel", methods=["GET"])
+def painel():
+    """Painel web para disparos manuais."""
+    return render_template("painel.html")
+
+
+@app.route("/preview", methods=["GET"])
+def preview():
+    """Retorna resumo dos inscritos para uma data: pendentes e respostas por unidade."""
+    data_ev = request.args.get("data_evento", "").strip()
+
+    if not data_ev:
+        return jsonify({"error": "Informe data_evento"}), 400
+
+    result = (
+        client.table("reminders")
+        .select("*")
+        .eq("data_evento", data_ev)
+        .execute()
+    )
+
+    pendentes_map = {}
+    respostas_map = {}
+
+    for r in (result.data or []):
+        unidade = r["unidade"]
+
+        # Pendentes (status = pending)
+        if r["status"] == "pending":
+            pendentes_map.setdefault(unidade, []).append(r["nome"])
+
+        # Respostas (todos, agrupados por status)
+        if unidade not in respostas_map:
+            respostas_map[unidade] = {"confirmados": [], "recusados": [], "sem_resposta": []}
+
+        if r["status"] == "confirmed":
+            respostas_map[unidade]["confirmados"].append(r["nome"])
+        elif r["status"] == "declined":
+            respostas_map[unidade]["recusados"].append(r["nome"])
+        else:
+            respostas_map[unidade]["sem_resposta"].append(r["nome"])
+
+    pendentes = [{"unidade": u, "pessoas": p} for u, p in pendentes_map.items()]
+    respostas = [
+        {"unidade": u, **v}
+        for u, v in respostas_map.items()
+    ]
+
+    return jsonify({"pendentes": pendentes, "respostas": respostas})
 
 
 @app.route("/health", methods=["GET"])
