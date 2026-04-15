@@ -212,27 +212,20 @@ def receive_treinamento():
     payload = request.json
     print(f"[TREINAMENTO] Payload recebido: {payload}")
 
+    # Labels dos campos de seleção de treinamento no Tally
+    TRAINING_LABELS = ("online", "prescencial", "presencial")
+
     if "data" in payload and "fields" in payload.get("data", {}):
+        fields = payload["data"]["fields"]
+
         def achar(keyword):
-            """Retorna o texto do primeiro campo cujo label contenha a keyword."""
-            for f in payload["data"]["fields"]:
-                if keyword.lower() in f["label"].lower():
-                    tipo = f.get("type", "")
+            for f in fields:
+                if keyword.lower() in f["label"].lower() and "(" not in f["label"]:
+                    tipo  = f.get("type", "")
                     valor = f.get("value")
-                    # Dropdown: value é lista de IDs
                     if tipo == "DROPDOWN" and isinstance(valor, list):
                         selected = [o["text"] for o in f.get("options", []) if o["id"] in valor]
                         return selected[0] if selected else ""
-                    # Checkbox / Multiple choice: value pode ser lista de IDs ou lista de textos
-                    if tipo in ("CHECKBOXES", "MULTIPLE_CHOICE") and isinstance(valor, list):
-                        if valor and isinstance(valor[0], dict):
-                            return valor[0].get("text", "")
-                        # tenta casar com options
-                        options = f.get("options", [])
-                        if options:
-                            selected = [o["text"] for o in options if o["id"] in valor]
-                            return selected[0] if selected else ""
-                        return str(valor[0]).strip() if valor else ""
                     if valor is None:
                         return ""
                     return str(valor).strip()
@@ -243,62 +236,55 @@ def receive_treinamento():
         email   = achar("email")
         crm     = achar("crm")
 
-        # Treinamento: tenta Online primeiro, depois Presencial (ou qualquer campo com "treinamento")
-        treinamento = ""
-        for f in payload["data"]["fields"]:
-            if "treinamento" in f["label"].lower():
-                tipo  = f.get("type", "")
-                valor = f.get("value")
-                if not valor:
-                    continue
-                if tipo in ("CHECKBOXES", "MULTIPLE_CHOICE", "DROPDOWN") and isinstance(valor, list):
+        # Coleta todos os treinamentos selecionados (campos CHECKBOXES "Online" / "Prescencial")
+        treinamentos_selecionados = []
+        for f in fields:
+            label_lower = f["label"].lower().strip()
+            tipo  = f.get("type", "")
+            valor = f.get("value")
+            # Apenas campos principais (sem parênteses = não são sub-campos expandidos)
+            if tipo == "CHECKBOXES" and isinstance(valor, list) and "(" not in f["label"]:
+                if any(label_lower == t or label_lower.startswith(t) for t in TRAINING_LABELS):
                     options = f.get("options", [])
-                    if options:
-                        selected = [o["text"] for o in options if o["id"] in valor]
-                        if selected:
-                            treinamento = selected[0]
-                            break
-                    if valor:
-                        treinamento = str(valor[0]).strip()
-                        break
-                else:
-                    treinamento = str(valor).strip()
-                    break
+                    selected = [o["text"] for o in options if o["id"] in valor]
+                    treinamentos_selecionados.extend(selected)
     else:
-        nome        = payload.get("nome", "").strip()
-        email       = payload.get("email", "").strip()
-        crm         = payload.get("crm", "").strip()
-        treinamento = payload.get("treinamento", "").strip()
-        unidade     = payload.get("unidade", "").strip()
+        nome    = payload.get("nome", "").strip()
+        email   = payload.get("email", "").strip()
+        crm     = payload.get("crm", "").strip()
+        unidade = payload.get("unidade", "").strip()
+        tr      = payload.get("treinamento", "").strip()
+        treinamentos_selecionados = [tr] if tr else []
 
-    if not all([nome, treinamento]):
-        print(f"[TREINAMENTO] Campos ausentes — nome={nome} treinamento={treinamento}")
+    if not nome or not treinamentos_selecionados:
+        print(f"[TREINAMENTO] Campos ausentes — nome={nome} treinamentos={treinamentos_selecionados}")
         return jsonify({"error": "Campos obrigatórios ausentes: nome, treinamento"}), 400
 
-    # Busca a data na tabela cronograma pelo nome exato do treinamento
-    cron = (
-        client.table("cronograma")
-        .select("data")
-        .eq("treinamento", treinamento)
-        .limit(1)
-        .execute()
-    )
-    data_tr = cron.data[0]["data"] if cron.data else None
-    print(f"[TREINAMENTO] Data encontrada no cronograma: {data_tr} para '{treinamento}'")
+    ids_salvos = []
+    for treinamento in treinamentos_selecionados:
+        cron = (
+            client.table("cronograma")
+            .select("data")
+            .eq("treinamento", treinamento)
+            .limit(1)
+            .execute()
+        )
+        data_tr = cron.data[0]["data"] if cron.data else None
+        print(f"[TREINAMENTO] Data encontrada: {data_tr} para '{treinamento}'")
 
-    record = client.table("treinamentos").insert({
-        "nome":             nome,
-        "email":            email or None,
-        "crm":              crm or None,
-        "treinamento":      treinamento,
-        "data_treinamento": data_tr,
-        "unidade":          unidade,
-    }).execute()
+        record = client.table("treinamentos").insert({
+            "nome":             nome,
+            "email":            email or None,
+            "crm":              crm or None,
+            "treinamento":      treinamento,
+            "data_treinamento": data_tr,
+            "unidade":          unidade,
+        }).execute()
 
-    registro_id = record.data[0]["id"]
-    print(f"[TREINAMENTO] Salvo: {nome} | {treinamento} | {data_tr} | id {registro_id}")
+        ids_salvos.append(record.data[0]["id"])
+        print(f"[TREINAMENTO] Salvo: {nome} | {treinamento} | {data_tr} | id {record.data[0]['id']}")
 
-    return jsonify({"ok": True, "id": registro_id}), 200
+    return jsonify({"ok": True, "ids": ids_salvos}), 200
 
 
 @app.route("/painel", methods=["GET"])
