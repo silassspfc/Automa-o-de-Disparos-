@@ -136,7 +136,12 @@ def gerar_e_enviar_certificados(data: str) -> str:
             pdf_bytes    = _gerar_pdf_bytes(nome, data_fmt)
             nome_arquivo = f"{nome.replace(' ', '_')}_{data.replace('-', '')}_{uuid.uuid4().hex[:6]}.pdf"
 
-            url = _upload_storage(pdf_bytes, nome_arquivo)
+            # Tenta upload no Storage (opcional — não trava se falhar)
+            url = None
+            try:
+                url = _upload_storage(pdf_bytes, nome_arquivo)
+            except Exception as e_storage:
+                print(f"[CERTIFICADO] Storage falhou para {nome}, seguindo sem URL: {e_storage}")
 
             if email and "@" in email:
                 _enviar_email(email, nome, treinamento, pdf_bytes, nome_arquivo)
