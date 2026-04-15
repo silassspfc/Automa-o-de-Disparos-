@@ -17,7 +17,7 @@ FONTS_DIR = os.path.join(BASE_DIR, "projeto", "assets", "fonts")
 EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE")
 EMAIL_SENHA     = os.getenv("EMAIL_SENHA")
 
-# Mesmos campos do gerar_certificados.py original
+# Mesmos campos do gerar_Certificados.py original
 CAMPOS = {
     "Nome Completo": {
         "caixa": (1064, 1046, 2615, 1327),
@@ -69,12 +69,12 @@ def _gerar_pdf_bytes(nome: str, data_formatada: str) -> bytes:
 
 def _upload_storage(pdf_bytes: bytes, nome_arquivo: str) -> str:
     """Faz upload no Supabase Storage e retorna a URL pública."""
-    supabase.storage.from_("certificados").upload(
+    supabase.storage.from_("Certificados").upload(
         path=nome_arquivo,
         file=pdf_bytes,
         file_options={"content-type": "application/pdf"}
     )
-    return supabase.storage.from_("certificados").get_public_url(nome_arquivo)
+    return supabase.storage.from_("Certificados").get_public_url(nome_arquivo)
 
 
 def _enviar_email(destinatario: str, nome: str, treinamento: str, pdf_bytes: bytes, nome_arquivo: str):
@@ -102,9 +102,9 @@ def _enviar_email(destinatario: str, nome: str, treinamento: str, pdf_bytes: byt
         s.sendmail(EMAIL_REMETENTE, destinatario, msg.as_string())
 
 
-def gerar_e_enviar_certificados(data: str) -> str:
+def gerar_e_enviar_Certificados(data: str) -> str:
     """
-    Gera e envia certificados para todos os inscritos de uma data (YYYY-MM-DD)
+    Gera e envia Certificados para todos os inscritos de uma data (YYYY-MM-DD)
     que ainda não receberam. Retorna resumo em texto para o agente.
     """
     result = (
