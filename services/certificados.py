@@ -102,7 +102,7 @@ def _enviar_email(destinatario: str, nome: str, treinamento: str, pdf_bytes: byt
         s.sendmail(EMAIL_REMETENTE, destinatario, msg.as_string())
 
 
-def gerar_e_enviar_Certificados(data: str) -> str:
+def gerar_e_enviar_certificados(data: str) -> str:
     """
     Gera e envia Certificados para todos os inscritos de uma data (YYYY-MM-DD)
     que ainda não receberam. Retorna resumo em texto para o agente.
