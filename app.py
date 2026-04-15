@@ -3,7 +3,7 @@ import re
 from flask import Flask, request, jsonify, render_template
 from datetime import datetime, timezone
 from services.supabase_client import client
-from services.whatsapp import send_reminder, send_report, GESTOR_NUMBER, _send
+from services.whatsapp import send_reminder, send_report, GESTOR_NUMBER, AGENTE_AUTORIZADOS, _send
 from services.agent import process_gestor_message
 
 app = Flask(__name__)
@@ -84,8 +84,8 @@ def receive_reply():
     telefone = data.get("ticket", {}).get("contact", {}).get("number", "")
     mensagem = (data.get("msg", {}).get("body") or "").strip()
 
-    # Mensagens do gestor → agente de IA
-    if GESTOR_NUMBER and telefone == GESTOR_NUMBER:
+    # Mensagens de números autorizados → agente de IA
+    if telefone in AGENTE_AUTORIZADOS or (GESTOR_NUMBER and telefone == GESTOR_NUMBER):
         print(f"[GESTOR] Mensagem recebida: {mensagem}")
         try:
             resposta = process_gestor_message(mensagem)

@@ -10,9 +10,12 @@ HEADERS         = {
     "Authorization": f"Bearer {os.getenv('AGILE_BEARERTOKEN')}",
     "Content-Type": "application/json"
 }
-SECRET_KEY       = os.getenv("AGILE_SECRETKEY")
-ORGANIZER_NUMBER = os.getenv("ORGANIZER_NUMBER")
-GESTOR_NUMBER    = os.getenv("GESTOR_NUMBER")
+SECRET_KEY           = os.getenv("AGILE_SECRETKEY")
+ORGANIZER_NUMBER     = os.getenv("ORGANIZER_NUMBER")
+GESTOR_NUMBER        = os.getenv("GESTOR_NUMBER")
+AGENTE_AUTORIZADOS   = set(
+    n.strip() for n in os.getenv("AGENTE_NUMEROS_AUTORIZADOS", "").split(",") if n.strip()
+)
 
 # --- Edite as mensagens abaixo ---
 
