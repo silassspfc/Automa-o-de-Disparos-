@@ -81,7 +81,7 @@ def receive_reply():
         return jsonify({"ok": True}), 200
 
     telefone = data.get("ticket", {}).get("contact", {}).get("number", "")
-    mensagem = data.get("msg", {}).get("body", "").strip().upper()
+    mensagem = (data.get("msg", {}).get("body") or "").strip().upper()
 
     # Aceita variações: SIM, NÃO, NAO, NÃO, sim, não...
     if mensagem not in ("SIM", "NÃO", "NAO"):
