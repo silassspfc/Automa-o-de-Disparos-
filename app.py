@@ -188,6 +188,32 @@ def relatorio():
     return jsonify({"ok": True, "relatorios_enviados": 1, "erros": []}), 200
 
 
+@app.route("/webhook/treinamento", methods=["POST"])
+def receive_treinamento():
+    """Recebe nova presença em treinamento enviada pelo Power Automate."""
+    data = request.json
+
+    nome        = data.get("nome", "").strip()
+    email       = data.get("email", "").strip()
+    treinamento = data.get("treinamento", "").strip()
+    data_tr     = data.get("data_treinamento", "").strip()  # formato: YYYY-MM-DD
+
+    if not all([nome, email, treinamento, data_tr]):
+        return jsonify({"error": "Campos obrigatórios ausentes: nome, email, treinamento, data_treinamento"}), 400
+
+    record = client.table("treinamentos").insert({
+        "nome":             nome,
+        "email":            email,
+        "treinamento":      treinamento,
+        "data_treinamento": data_tr,
+    }).execute()
+
+    registro_id = record.data[0]["id"]
+    print(f"[TREINAMENTO] Salvo: {nome} | {treinamento} | {data_tr} | id {registro_id}")
+
+    return jsonify({"ok": True, "id": registro_id}), 200
+
+
 @app.route("/painel", methods=["GET"])
 def painel():
     """Painel web para disparos manuais."""
