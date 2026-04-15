@@ -21,6 +21,9 @@ def receive_form():
         def achar(keyword):
             for f in payload["data"]["fields"]:
                 if keyword.lower() in f["label"].lower():
+                    if f.get("type") == "DROPDOWN" and isinstance(f.get("value"), list):
+                        selected = [o["text"] for o in f.get("options", []) if o["id"] in f["value"]]
+                        return selected[0] if selected else ""
                     return str(f["value"]).strip()
             return ""
 
@@ -215,6 +218,9 @@ def receive_treinamento():
         def achar(keyword):
             for f in payload["data"]["fields"]:
                 if keyword.lower() in f["label"].lower():
+                    if f.get("type") == "DROPDOWN" and isinstance(f.get("value"), list):
+                        selected = [o["text"] for o in f.get("options", []) if o["id"] in f["value"]]
+                        return selected[0] if selected else ""
                     return str(f["value"]).strip()
             return ""
 
