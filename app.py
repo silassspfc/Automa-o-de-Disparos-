@@ -196,16 +196,23 @@ def receive_treinamento():
     nome        = data.get("nome", "").strip()
     email       = data.get("email", "").strip()
     treinamento = data.get("treinamento", "").strip()
-    data_tr     = data.get("data_treinamento", "").strip()  # formato: YYYY-MM-DD
+    data_tr     = data.get("data_treinamento", "").strip()
+    unidade     = data.get("unidade", "").strip()
 
     if not all([nome, email, treinamento, data_tr]):
         return jsonify({"error": "Campos obrigatórios ausentes: nome, email, treinamento, data_treinamento"}), 400
+
+    # Aceita dd/MM/yyyy ou yyyy-MM-dd
+    if len(data_tr) == 10 and data_tr[2] == "/":
+        from datetime import datetime as dt
+        data_tr = dt.strptime(data_tr, "%d/%m/%Y").strftime("%Y-%m-%d")
 
     record = client.table("treinamentos").insert({
         "nome":             nome,
         "email":            email,
         "treinamento":      treinamento,
         "data_treinamento": data_tr,
+        "unidade":          unidade,
     }).execute()
 
     registro_id = record.data[0]["id"]
