@@ -1,23 +1,15 @@
 import os
 import io
 import uuid
-import smtplib
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
-from email import encoders
 from services.supabase_client import client as supabase
+from services.whatsapp import _send
 
 BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE  = os.path.join(BASE_DIR, "projeto", "assets", "certificado.png")
 FONTS_DIR = os.path.join(BASE_DIR, "projeto", "assets", "fonts")
 
-EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE")
-EMAIL_SENHA     = os.getenv("EMAIL_SENHA")
-
-# Mesmos campos do gerar_Certificados.py original
 CAMPOS = {
     "Nome Completo": {
         "caixa": (1064, 1046, 2615, 1327),
@@ -77,35 +69,22 @@ def _upload_storage(pdf_bytes: bytes, nome_arquivo: str) -> str:
     return supabase.storage.from_("Certificados").get_public_url(nome_arquivo)
 
 
-def _enviar_email(destinatario: str, nome: str, treinamento: str, pdf_bytes: bytes, nome_arquivo: str):
-    msg           = MIMEMultipart()
-    msg["From"]   = EMAIL_REMETENTE
-    msg["To"]     = destinatario
-    msg["Subject"] = f"Certificado de Treinamento — {treinamento}"
-
-    msg.attach(MIMEText(
-        f"Olá, {nome}!\n\n"
-        f"Segue em anexo o seu certificado de conclusão do treinamento \"{treinamento}\".\n\n"
-        f"Parabéns pela participação!\n\nAtenciosamente,\nOnodera Estética",
-        "plain", "utf-8"
-    ))
-
-    parte = MIMEBase("application", "octet-stream")
-    parte.set_payload(pdf_bytes)
-    encoders.encode_base64(parte)
-    parte.add_header("Content-Disposition", f'attachment; filename="{nome_arquivo}"')
-    msg.attach(parte)
-
-    with smtplib.SMTP("smtp.office365.com", 587, timeout=30) as s:
-        s.starttls()
-        s.login(EMAIL_REMETENTE, EMAIL_SENHA)
-        s.sendmail(EMAIL_REMETENTE, destinatario, msg.as_string())
+def _telefone_unidade(unidade: str) -> str:
+    """Busca o telefone do responsável pela unidade."""
+    result = (
+        supabase.table("unidades")
+        .select("telefone_responsavel")
+        .eq("nome", unidade)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0]["telefone_responsavel"] if result.data else ""
 
 
 def gerar_e_enviar_certificados(data: str) -> str:
     """
-    Gera e envia Certificados para todos os inscritos de uma data (YYYY-MM-DD)
-    que ainda não receberam. Retorna resumo em texto para o agente.
+    Gera certificados para todos os inscritos de uma data (YYYY-MM-DD),
+    salva no Storage e envia 1 WhatsApp por unidade com os links.
     """
     result = (
         supabase.table("treinamentos")
@@ -124,30 +103,26 @@ def gerar_e_enviar_certificados(data: str) -> str:
     except Exception:
         data_fmt = data
 
-    enviados, sem_email, erros = [], [], []
+    # Agrupa por unidade: { unidade: [ {nome, url, rid}, ... ] }
+    grupos = {}
+    erros  = []
 
     for r in registros:
-        nome        = r["nome"]
-        email       = r.get("email") or ""
-        treinamento = r["treinamento"]
-        rid         = r["id"]
+        nome      = r["nome"]
+        unidade   = r.get("unidade") or "Sem unidade"
+        rid       = r["id"]
 
         try:
             pdf_bytes    = _gerar_pdf_bytes(nome, data_fmt)
             nome_arquivo = f"{nome.replace(' ', '_')}_{data.replace('-', '')}_{uuid.uuid4().hex[:6]}.pdf"
 
-            # Tenta upload no Storage (opcional — não trava se falhar)
             url = None
             try:
                 url = _upload_storage(pdf_bytes, nome_arquivo)
             except Exception as e_storage:
-                print(f"[CERTIFICADO] Storage falhou para {nome}, seguindo sem URL: {e_storage}")
+                print(f"[CERTIFICADO] Storage falhou para {nome}: {e_storage}")
 
-            if email and "@" in email:
-                _enviar_email(email, nome, treinamento, pdf_bytes, nome_arquivo)
-                enviados.append(f"{r.get('unidade', '')} - {nome}")
-            else:
-                sem_email.append(f"{r.get('unidade', '')} - {nome} (sem email)")
+            grupos.setdefault(unidade, []).append({"nome": nome, "url": url, "rid": rid})
 
             supabase.table("treinamentos").update({
                 "certificado_enviado": True,
@@ -158,15 +133,43 @@ def gerar_e_enviar_certificados(data: str) -> str:
             erros.append(f"{nome}: {e}")
             print(f"[CERTIFICADO] Erro para {nome}: {e}")
 
+    # Envia 1 WhatsApp por unidade
+    enviados_wpp = []
+    erros_wpp    = []
+
+    for unidade, pessoas in grupos.items():
+        telefone = _telefone_unidade(unidade)
+        if not telefone:
+            erros_wpp.append(f"{unidade} (sem telefone cadastrado)")
+            continue
+
+        linhas_msg = [f"Certificados — {data_fmt}\nUnidade: {unidade}\n"]
+        for p in pessoas:
+            if p["url"]:
+                linhas_msg.append(f"• {p['nome']}\n{p['url']}")
+            else:
+                linhas_msg.append(f"• {p['nome']} (certificado gerado, link indisponível)")
+
+        mensagem = "\n\n".join(linhas_msg)
+
+        try:
+            _send(telefone, mensagem)
+            enviados_wpp.append(f"{unidade} ({len(pessoas)} pessoa(s))")
+            print(f"[CERTIFICADO] WhatsApp enviado para {unidade} ({telefone})")
+        except Exception as e_wpp:
+            erros_wpp.append(f"{unidade}: {e_wpp}")
+            print(f"[CERTIFICADO] Erro WhatsApp para {unidade}: {e_wpp}")
+
+    # Resumo para o agente
     linhas = [f"Certificados — {data_fmt}"]
-    if enviados:
-        linhas.append(f"\n{len(enviados)} enviado(s) por email:")
-        linhas += [f"  ✓ {e}" for e in enviados]
-    if sem_email:
-        linhas.append(f"\n{len(sem_email)} gerado(s) sem email:")
-        linhas += [f"  ○ {e}" for e in sem_email]
+    if enviados_wpp:
+        linhas.append(f"\n{len(enviados_wpp)} unidade(s) notificadas via WhatsApp:")
+        linhas += [f"  ✓ {e}" for e in enviados_wpp]
+    if erros_wpp:
+        linhas.append(f"\n{len(erros_wpp)} unidade(s) sem envio:")
+        linhas += [f"  ○ {e}" for e in erros_wpp]
     if erros:
-        linhas.append(f"\n{len(erros)} erro(s):")
+        linhas.append(f"\n{len(erros)} erro(s) na geração:")
         linhas += [f"  ✗ {e}" for e in erros]
 
     return "\n".join(linhas)
