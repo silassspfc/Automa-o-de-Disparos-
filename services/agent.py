@@ -3,7 +3,6 @@ import json
 from datetime import date
 from openai import OpenAI
 from services.supabase_client import client as supabase
-from services.certificados import gerar_e_enviar_certificados
 
 def _get_openai_client():
     api_key = os.getenv("OPENAI_API_KEY")
@@ -62,23 +61,6 @@ TOOLS = [
             }
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "gerar_certificados_por_data",
-            "description": "Gera e envia por email os certificados de todos os inscritos de uma data de treinamento. Salva os arquivos no Supabase Storage.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "string",
-                        "description": "Data no formato YYYY-MM-DD, ex: 2026-05-04"
-                    }
-                },
-                "required": ["data"]
-            }
-        }
-    }
 ]
 
 
@@ -146,8 +128,6 @@ def _execute_tool(name: str, args: dict) -> str:
         return _buscar_inscritos(args["data"])
     if name == "listar_treinamentos":
         return _listar_treinamentos()
-    if name == "gerar_certificados_por_data":
-        return gerar_e_enviar_certificados(args["data"])
     return "Ferramenta desconhecida."
 
 

@@ -1,5 +1,0 @@
-Pillow
-pandas
-openpyxl
-python-dotenv
-streamlit

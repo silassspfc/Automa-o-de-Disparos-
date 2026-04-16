@@ -320,20 +320,6 @@ def receive_treinamento():
     return jsonify({"ok": True, "ids": ids_salvos}), 200
 
 
-@app.route("/certificados", methods=["GET"])
-def certificados():
-    """Disparo manual de certificados para uma data de treinamento."""
-    data_tr = request.args.get("data", "").strip()
-
-    if not data_tr:
-        return jsonify({"error": "Informe o parâmetro data (ex: /certificados?data=2026-05-15)"}), 400
-
-    from services.certificados import gerar_e_enviar_certificados
-    resultado = gerar_e_enviar_certificados(data_tr)
-    print(f"[CERTIFICADOS] {resultado}")
-    return jsonify({"ok": True, "resultado": resultado}), 200
-
-
 @app.route("/painel", methods=["GET"])
 def painel():
     """Painel web para disparos manuais."""
