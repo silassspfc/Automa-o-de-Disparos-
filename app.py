@@ -5,35 +5,28 @@ from datetime import datetime, timezone
 from services.supabase_client import client
 from services.whatsapp import send_reminder, send_report, GESTOR_NUMBER, AGENTE_AUTORIZADOS, _send
 from services.agent import process_gestor_message
+from services.tally import achar
 
 app = Flask(__name__)
 
 LOCAL_EVENTO = os.getenv("LOCAL_EVENTO", "")
 
+TRAINING_LABELS = ("online", "prescencial", "presencial")
+
 
 @app.route("/webhook/form", methods=["POST"])
 def receive_form():
-    """Recebe nova inscrição — suporta Tally e payload flat."""
+    """Recebe nova inscrição via Tally ou payload flat."""
     payload = request.json
     print(f"[FORM] Payload recebido: {payload}")
 
-    # Formato Tally
     if "data" in payload and "fields" in payload.get("data", {}):
-        def achar(keyword):
-            for f in payload["data"]["fields"]:
-                if keyword.lower() in f["label"].lower():
-                    if f.get("type") == "DROPDOWN" and isinstance(f.get("value"), list):
-                        selected = [o["text"] for o in f.get("options", []) if o["id"] in f["value"]]
-                        return selected[0] if selected else ""
-                    return str(f["value"]).strip()
-            return ""
-
-        nome       = achar("nome")
-        unidade    = achar("unidade")
-        tel_pessoa = re.sub(r"\D", "", achar("telefone"))
-        data_ev    = achar("data")
+        fields     = payload["data"]["fields"]
+        nome       = achar(fields, "nome")
+        unidade    = achar(fields, "unidade")
+        tel_pessoa = re.sub(r"\D", "", achar(fields, "telefone"))
+        data_ev    = achar(fields, "data")
     else:
-        # Formato flat (Power Automate)
         nome       = payload.get("nome", "").strip()
         unidade    = payload.get("unidade", "").strip()
         tel_pessoa = re.sub(r"\D", "", payload.get("telefone", ""))
@@ -42,7 +35,6 @@ def receive_form():
     if not all([nome, unidade, data_ev]):
         return jsonify({"error": "Campos obrigatórios ausentes: nome, unidade, data_evento"}), 400
 
-    # Busca o telefone do franqueado/gerente responsável pela unidade
     unidade_result = (
         client.table("unidades")
         .select("telefone_responsavel")
@@ -74,19 +66,21 @@ def receive_form():
 
 @app.route("/webhook/whatsapp", methods=["POST"])
 def receive_reply():
-    """Recebe todas as mensagens do segundo número via Agile Talk."""
+    """Recebe mensagens do número bot via Agile Talk."""
     data = request.json
 
-    # Ignora mensagens enviadas pelo próprio bot
     if data.get("method") == "message_sent_waba":
         return jsonify({"ok": True}), 200
 
     telefone = data.get("ticket", {}).get("contact", {}).get("number", "")
     mensagem = (data.get("msg", {}).get("body") or "").strip()
 
-    # Mensagens de números autorizados → agente de IA
+    if not telefone:
+        print(f"[WHATSAPP] Payload sem telefone ignorado: {data}")
+        return jsonify({"ok": True}), 200
+
     if telefone in AGENTE_AUTORIZADOS or (GESTOR_NUMBER and telefone == GESTOR_NUMBER):
-        print(f"[GESTOR] Mensagem recebida: {mensagem}")
+        print(f"[GESTOR] Mensagem recebida de {telefone}: {mensagem}")
         try:
             resposta = process_gestor_message(mensagem)
             _send(GESTOR_NUMBER, resposta)
@@ -95,14 +89,12 @@ def receive_reply():
             print(f"[GESTOR] Erro ao processar: {e}")
         return jsonify({"ok": True}), 200
 
-    # Respostas de confirmação (SIM/NÃO) dos franqueados
-    mensagem = mensagem.upper()
-    if mensagem not in ("SIM", "NÃO", "NAO"):
+    mensagem_upper = mensagem.upper()
+    if mensagem_upper not in ("SIM", "NÃO", "NAO"):
         return jsonify({"ok": True}), 200
 
-    status = "confirmed" if mensagem == "SIM" else "declined"
+    status = "confirmed" if mensagem_upper == "SIM" else "declined"
 
-    # Busca o lembrete mais recente desse telefone com status "sent"
     result = (
         client.table("reminders")
         .select("id")
@@ -123,13 +115,13 @@ def receive_reply():
         "replied_at": datetime.now(timezone.utc).isoformat()
     }).eq("id", reminder_id).execute()
 
-    print(f"[RESPOSTA] Telefone {telefone} respondeu {mensagem} → {status}")
+    print(f"[RESPOSTA] {telefone} respondeu {mensagem_upper} → {status}")
     return jsonify({"ok": True}), 200
 
 
 @app.route("/disparar", methods=["GET"])
 def disparar():
-    """Disparo manual: envia WhatsApp para todos os pendentes de uma data de evento."""
+    """Envia WhatsApp para todos os inscritos pendentes de uma data de evento."""
     data_ev = request.args.get("data_evento", "").strip()
 
     if not data_ev:
@@ -146,7 +138,6 @@ def disparar():
     if not result.data:
         return jsonify({"ok": True, "enviados": 0, "msg": "Nenhum inscrito pendente para essa data"}), 200
 
-    # Agrupa por (unidade, telefone) → 1 mensagem por unidade com todos os nomes
     grupos = {}
     for r in result.data:
         chave = (r["unidade"], r["telefone"])
@@ -166,7 +157,7 @@ def disparar():
                     "sent_at": datetime.now(timezone.utc).isoformat()
                 }).eq("id", rid).execute()
             enviados += len(dados["nomes"])
-            print(f"[DISPARO] Enviado para unidade {unidade} ({telefone}) — {len(dados['nomes'])} pessoa(s)")
+            print(f"[DISPARO] Unidade {unidade} ({telefone}) — {len(dados['nomes'])} pessoa(s)")
         except Exception as e:
             erros.extend(dados["nomes"])
             print(f"[ERRO] Falha ao enviar para {unidade}: {e}")
@@ -176,7 +167,7 @@ def disparar():
 
 @app.route("/relatorio", methods=["GET"])
 def relatorio():
-    """Disparo manual do relatório de confirmações para uma data de evento."""
+    """Envia relatório de confirmações para uma data de evento."""
     data_ev = request.args.get("data_evento", "").strip()
 
     if not data_ev:
@@ -192,7 +183,6 @@ def relatorio():
     if not result.data:
         return jsonify({"ok": True, "msg": "Nenhum inscrito encontrado para essa data"}), 200
 
-    # Agrupa todas as unidades em um único dict para envio consolidado
     eventos = {}
     ids = []
     for r in result.data:
@@ -211,7 +201,7 @@ def relatorio():
         send_report(data=data_ev, eventos=eventos)
         for rid in ids:
             client.table("reminders").update({"report_sent": True}).eq("id", rid).execute()
-        print(f"[RELATORIO] Enviado para evento {data_ev} — {len(eventos)} unidade(s)")
+        print(f"[RELATORIO] Evento {data_ev} — {len(eventos)} unidade(s)")
     except Exception as e:
         print(f"[ERRO] Falha ao enviar relatório: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -221,49 +211,28 @@ def relatorio():
 
 @app.route("/webhook/treinamento", methods=["POST"])
 def receive_treinamento():
-    """Recebe inscrição de treinamento — formulário Geral e Médicos (Tally) ou payload flat."""
+    """Recebe inscrição de treinamento via Tally ou payload flat."""
     payload = request.json
     print(f"[TREINAMENTO] Payload recebido: {payload}")
 
-    # Labels dos campos de seleção de treinamento no Tally
-    TRAINING_LABELS = ("online", "prescencial", "presencial")
-
     if "data" in payload and "fields" in payload.get("data", {}):
-        fields = payload["data"]["fields"]
+        fields  = payload["data"]["fields"]
+        nome    = achar(fields, "nome",    exclude_parens=True)
+        unidade = achar(fields, "unidade", exclude_parens=True)
+        email   = achar(fields, "email",   exclude_parens=True)
+        crm     = achar(fields, "crm",     exclude_parens=True)
 
-        def achar(keyword):
-            for f in fields:
-                if keyword.lower() in f["label"].lower() and "(" not in f["label"]:
-                    tipo  = f.get("type", "")
-                    valor = f.get("value")
-                    if tipo == "DROPDOWN" and isinstance(valor, list):
-                        selected = [o["text"] for o in f.get("options", []) if o["id"] in valor]
-                        return selected[0] if selected else ""
-                    if valor is None:
-                        return ""
-                    return str(valor).strip()
-            return ""
-
-        nome    = achar("nome")
-        unidade = achar("unidade")
-        email   = achar("email")
-        crm     = achar("crm")
-
-        # Coleta todos os treinamentos selecionados
         treinamentos_selecionados = []
         for f in fields:
             label_lower = f["label"].lower().strip()
             tipo  = f.get("type", "")
             valor = f.get("value")
 
-            # CHECKBOXES "Online" / "Prescencial"
             if tipo == "CHECKBOXES" and isinstance(valor, list) and "(" not in f["label"]:
                 if any(label_lower == t or label_lower.startswith(t) for t in TRAINING_LABELS):
-                    options = f.get("options", [])
-                    selected = [o["text"] for o in options if o["id"] in valor]
+                    selected = [o["text"] for o in f.get("options", []) if o["id"] in valor]
                     treinamentos_selecionados.extend(selected)
 
-            # HIDDEN_FIELDS — label é o nome do treinamento (formulário por evento específico)
             elif tipo == "HIDDEN_FIELDS" and f["label"].strip():
                 treinamentos_selecionados.append(f["label"].strip())
     else:
@@ -274,7 +243,6 @@ def receive_treinamento():
         tr      = payload.get("treinamento", "").strip()
         treinamentos_selecionados = [tr] if tr else []
 
-    # Fallback: busca treinamento pelo tally_form_id no cronograma
     if not treinamentos_selecionados:
         form_id = payload.get("data", {}).get("formId", "")
         if form_id:
@@ -322,13 +290,12 @@ def receive_treinamento():
 
 @app.route("/painel", methods=["GET"])
 def painel():
-    """Painel web para disparos manuais."""
     return render_template("painel.html")
 
 
 @app.route("/preview", methods=["GET"])
 def preview():
-    """Retorna resumo dos inscritos para uma data: pendentes e respostas por unidade."""
+    """Retorna inscritos de uma data agrupados por status e unidade."""
     data_ev = request.args.get("data_evento", "").strip()
 
     if not data_ev:
@@ -347,11 +314,9 @@ def preview():
     for r in (result.data or []):
         unidade = r["unidade"]
 
-        # Pendentes (status = pending)
         if r["status"] == "pending":
             pendentes_map.setdefault(unidade, []).append(r["nome"])
 
-        # Respostas (todos, agrupados por status)
         if unidade not in respostas_map:
             respostas_map[unidade] = {"confirmados": [], "recusados": [], "sem_resposta": []}
 
@@ -362,13 +327,10 @@ def preview():
         else:
             respostas_map[unidade]["sem_resposta"].append(r["nome"])
 
-    pendentes = [{"unidade": u, "pessoas": p} for u, p in pendentes_map.items()]
-    respostas = [
-        {"unidade": u, **v}
-        for u, v in respostas_map.items()
-    ]
-
-    return jsonify({"pendentes": pendentes, "respostas": respostas})
+    return jsonify({
+        "pendentes": [{"unidade": u, "pessoas": p} for u, p in pendentes_map.items()],
+        "respostas": [{"unidade": u, **v} for u, v in respostas_map.items()]
+    })
 
 
 @app.route("/health", methods=["GET"])

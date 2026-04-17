@@ -133,7 +133,8 @@ def _execute_tool(name: str, args: dict) -> str:
 
 def process_gestor_message(mensagem: str) -> str:
     """Recebe mensagem do gestor, chama OpenAI com tools e retorna resposta em texto."""
-    today = date.today().strftime("%d/%m/%Y")
+    today  = date.today().strftime("%d/%m/%Y")
+    client = _get_openai_client()
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT.format(today=today)},
@@ -141,7 +142,7 @@ def process_gestor_message(mensagem: str) -> str:
     ]
 
     for _ in range(5):
-        response = _get_openai_client().chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             tools=TOOLS,
