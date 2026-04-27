@@ -173,3 +173,59 @@ def relatorio_confirmacoes(data: str) -> str:
         linhas += [f"  {r['unidade']} — {r['nome']}" for r in pendentes]
 
     return "\n".join(linhas)
+
+
+def ativar_treinamento(data: str) -> str:
+    """Envia mensagem de ativação para o grupo geral dos treinamentos de uma data."""
+    cron = (
+        client.table("cronograma")
+        .select("treinamento, link_inscricao, numero_grupo")
+        .eq("data", data)
+        .neq("tipo", "online")
+        .execute()
+    )
+
+    registros = [r for r in (cron.data or []) if r.get("numero_grupo")]
+
+    if not cron.data:
+        return f"Nenhum treinamento presencial em {data}."
+    if not registros:
+        return f"Nenhum treinamento com grupo configurado para {data}. Preencha numero_grupo e link_inscricao no cronograma."
+
+    try:
+        data_fmt = datetime.strptime(data, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        data_fmt = data
+
+    enviados, erros = [], []
+
+    for r in registros:
+        nome_tr = r["treinamento"]
+        grupo   = r["numero_grupo"]
+        link    = r.get("link_inscricao") or ""
+
+        mensagem = (
+            f"Boa tarde, rede Onodera!\n"
+            f"Passando para reforçar a participação no *{nome_tr}*!\n"
+            f"Contamos com a presença de vocês!"
+        )
+        if link:
+            mensagem += f"\n\nInscrições: {link}"
+
+        try:
+            _send(grupo, mensagem)
+            enviados.append(nome_tr)
+            print(f"[ATIVAÇÃO] Enviado para grupo {grupo}: {nome_tr}")
+        except Exception as e:
+            erros.append(f"{nome_tr}: {e}")
+            print(f"[ATIVAÇÃO] Erro ao enviar {nome_tr}: {e}")
+
+    linhas = [f"Ativação — {data_fmt}"]
+    if enviados:
+        linhas.append(f"\n{len(enviados)} treinamento(s) ativado(s):")
+        linhas += [f"  ✓ {t}" for t in enviados]
+    if erros:
+        linhas.append(f"\nErros:")
+        linhas += [f"  ✗ {e}" for e in erros]
+
+    return "\n".join(linhas)

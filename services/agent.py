@@ -3,7 +3,7 @@ import json
 from datetime import date
 from openai import OpenAI
 from services.supabase_client import client as supabase
-from services.treinamentos import preview_confirmacao, confirmar_presenca, relatorio_confirmacoes
+from services.treinamentos import preview_confirmacao, confirmar_presenca, relatorio_confirmacoes, ativar_treinamento
 
 
 def _get_openai_client():
@@ -106,6 +106,20 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "ativar_treinamento",
+            "description": "Envia mensagem de ativação para o grupo geral do WhatsApp divulgando o treinamento e o link de inscrição. Usar quando o gestor pedir para ativar, divulgar ou disparar o treinamento.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "data": {"type": "string", "description": "Data no formato YYYY-MM-DD, ex: 2026-05-15"}
+                },
+                "required": ["data"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "relatorio_confirmacoes_treinamento",
             "description": "Retorna relatório de confirmados, recusados e sem resposta para os treinamentos presenciais de uma data.",
             "parameters": {
@@ -185,6 +199,8 @@ def _execute_tool(name: str, args: dict) -> str | None:
         return preview_confirmacao(args["data"])
     if name == "confirmar_presenca_treinamento":
         return confirmar_presenca(args["data"])
+    if name == "ativar_treinamento":
+        return ativar_treinamento(args["data"])
     if name == "relatorio_confirmacoes_treinamento":
         return relatorio_confirmacoes(args["data"])
     return "Ferramenta desconhecida."
@@ -197,6 +213,7 @@ _DISPLAY_TOOLS = {
     "buscar_medicos_por_data",
     "listar_treinamentos",
     "relatorio_confirmacoes_treinamento",
+    "ativar_treinamento",
 }
 
 
