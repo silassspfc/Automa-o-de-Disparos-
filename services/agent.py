@@ -166,8 +166,8 @@ _MESES = {
     "set": "09", "out": "10", "nov": "11", "dez": "12",
 }
 
-_KW_CONFIRMAR  = re.compile(r"confirm|entrar em contato|contato com respons", re.I)
-_KW_RELATORIO  = re.compile(r"relat[oó]rio|quem confirmou|quem respondeu|status", re.I)
+_KW_CONFIRMAR  = re.compile(r"confirm|entr[ea] em contato|contato com respons|avisa|notifica", re.I)
+_KW_RELATORIO  = re.compile(r"relat[oó]rio|quem confirmou|quem respondeu|status|quantos confirm", re.I)
 _DATA_DDMM     = re.compile(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?")
 _DATA_DDMES    = re.compile(r"(\d{1,2})\s+de\s+([a-z]+)", re.I)
 
