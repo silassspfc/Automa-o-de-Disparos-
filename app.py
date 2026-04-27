@@ -48,8 +48,6 @@ def receive_reply():
         .select("id")
         .eq("telefone_responsavel", telefone)
         .eq("confirmacao_status", "sent")
-        .order("created_at", desc=True)
-        .limit(1)
         .execute()
     )
 
@@ -58,9 +56,9 @@ def receive_reply():
 
     client.table("treinamentos").update({
         "confirmacao_status": status
-    }).eq("id", result.data[0]["id"]).execute()
+    }).eq("telefone_responsavel", telefone).eq("confirmacao_status", "sent").execute()
 
-    print(f"[CONFIRMAÇÃO] {telefone} respondeu {mensagem_upper} → {status}")
+    print(f"[CONFIRMAÇÃO] {telefone} respondeu {mensagem_upper} → {status} ({len(result.data)} inscrito(s))")
     return jsonify({"ok": True}), 200
 
 
@@ -128,13 +126,23 @@ def receive_treinamento():
         data_tr = cron.data[0]["data"] if cron.data else None
         print(f"[TREINAMENTO] Data encontrada: {data_tr} para '{treinamento}'")
 
+        unidade_result = (
+            client.table("unidades")
+            .select("telefone_responsavel")
+            .eq("nome", unidade)
+            .limit(1)
+            .execute()
+        )
+        telefone_responsavel = unidade_result.data[0]["telefone_responsavel"] if unidade_result.data else None
+
         record = client.table("treinamentos").insert({
-            "nome":             nome,
-            "email":            email or None,
-            "crm":              crm or None,
-            "treinamento":      treinamento,
-            "data_treinamento": data_tr,
-            "unidade":          unidade,
+            "nome":                 nome,
+            "email":                email or None,
+            "crm":                  crm or None,
+            "treinamento":          treinamento,
+            "data_treinamento":     data_tr,
+            "unidade":              unidade,
+            "telefone_responsavel": telefone_responsavel,
         }).execute()
 
         ids_salvos.append(record.data[0]["id"])
