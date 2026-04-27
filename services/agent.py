@@ -1,6 +1,5 @@
 import os
 import json
-import re
 from datetime import date
 from openai import OpenAI
 from services.supabase_client import client as supabase
@@ -18,15 +17,25 @@ SYSTEM_PROMPT = """Você é um assistente de gestão da Onodera Estética, espec
 Responda sempre em português, de forma direta e concisa, sem formatação markdown.
 Hoje é {today}.
 
-Você TEM a capacidade de enviar mensagens de WhatsApp para os responsáveis das unidades através das ferramentas disponíveis. NUNCA diga que não pode entrar em contato com responsáveis.
-
-Regras obrigatórias de uso das ferramentas:
-- "confirmar presença", "entrar em contato com responsáveis", "enviar confirmação", "confirmar treinamento" → chame IMEDIATAMENTE confirmar_presenca_treinamento. Se o gestor não informou a data, pergunte apenas a data.
-- "quem confirmou", "relatório de confirmações", "quem respondeu", "status das confirmações" → use relatorio_confirmacoes_treinamento.
-- "quem está inscrito", "inscritos na data" → use buscar_inscritos_por_data.
-- "ver treinamentos", "cronograma" → use listar_treinamentos."""
+Você SEMPRE deve usar uma das ferramentas disponíveis para responder — nunca responda diretamente sem usar uma ferramenta.
+Para respostas de texto simples, use a ferramenta "responder".
+Para qualquer ação ou consulta, use a ferramenta correspondente."""
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "responder",
+            "description": "Envia uma resposta de texto ao gestor. Usar para perguntas gerais, pedidos de esclarecimento ou quando nenhuma outra ferramenta se aplica.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mensagem": {"type": "string", "description": "Texto da resposta ao gestor"}
+                },
+                "required": ["mensagem"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -67,7 +76,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "confirmar_presenca_treinamento",
-            "description": "Envia mensagem de WhatsApp para os responsáveis de cada unidade perguntando se os inscritos confirmarão presença no treinamento presencial de uma data. Acionar quando o gestor pedir para 'confirmar presença', 'enviar confirmação', 'confirmar treinamento' ou expressões similares.",
+            "description": "Envia mensagem de WhatsApp para os responsáveis de cada unidade perguntando se os inscritos confirmarão presença. Usar quando o gestor pedir para confirmar presença, avisar responsáveis, entrar em contato com as unidades, ou qualquer variação desse pedido.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -146,7 +155,9 @@ def _buscar_medicos(data: str) -> str:
     return f"{len(medicos)} médico(s) inscrito(s):\n" + "\n".join(linhas)
 
 
-def _execute_tool(name: str, args: dict) -> str:
+def _execute_tool(name: str, args: dict) -> str | None:
+    if name == "responder":
+        return None  # sinaliza que a resposta já está em args["mensagem"]
     if name == "listar_treinamentos":
         return _listar_treinamentos()
     if name == "buscar_inscritos_por_data":
@@ -160,50 +171,7 @@ def _execute_tool(name: str, args: dict) -> str:
     return "Ferramenta desconhecida."
 
 
-_MESES = {
-    "jan": "01", "fev": "02", "mar": "03", "abr": "04",
-    "mai": "05", "jun": "06", "jul": "07", "ago": "08",
-    "set": "09", "out": "10", "nov": "11", "dez": "12",
-}
-
-_KW_CONFIRMAR  = re.compile(r"confirm|entr[ea] em contato|contato com respons|avisa|notifica", re.I)
-_KW_RELATORIO  = re.compile(r"relat[oó]rio|quem confirmou|quem respondeu|status|quantos confirm", re.I)
-_DATA_DDMM     = re.compile(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?")
-_DATA_DDMES    = re.compile(r"(\d{1,2})\s+de\s+([a-z]+)", re.I)
-
-
-def _extrair_data(texto: str) -> str | None:
-    ano = date.today().year
-    m = _DATA_DDMM.search(texto)
-    if m:
-        dia, mes = m.group(1).zfill(2), m.group(2).zfill(2)
-        return f"{ano}-{mes}-{dia}"
-    m = _DATA_DDMES.search(texto)
-    if m:
-        dia  = m.group(1).zfill(2)
-        nome = m.group(2)[:3].lower()
-        mes  = _MESES.get(nome)
-        if mes:
-            return f"{ano}-{mes}-{dia}"
-    return None
-
-
 def process_gestor_message(mensagem: str) -> str:
-    # Roteamento direto por palavras-chave — contorna limitações do LLM
-    if _KW_CONFIRMAR.search(mensagem):
-        data = _extrair_data(mensagem)
-        if not data:
-            return "Para qual data devo enviar a confirmação de presença? (ex: 15/05)"
-        print(f"[AGENTE] Roteamento direto → confirmar_presenca({data})")
-        return confirmar_presenca(data)
-
-    if _KW_RELATORIO.search(mensagem):
-        data = _extrair_data(mensagem)
-        if not data:
-            return "Para qual data devo gerar o relatório de confirmações? (ex: 15/05)"
-        print(f"[AGENTE] Roteamento direto → relatorio_confirmacoes({data})")
-        return relatorio_confirmacoes(data)
-
     today  = date.today().strftime("%d/%m/%Y")
     client = _get_openai_client()
 
@@ -217,22 +185,25 @@ def process_gestor_message(mensagem: str) -> str:
             model="gpt-4o",
             messages=messages,
             tools=TOOLS,
-            tool_choice="auto"
+            tool_choice="required"
         )
 
         msg = response.choices[0].message
+        tc  = msg.tool_calls[0]
+        args = json.loads(tc.function.arguments)
 
-        if not msg.tool_calls:
-            return msg.content
+        print(f"[AGENTE] Tool chamada: {tc.function.name} | args: {args}")
+
+        if tc.function.name == "responder":
+            return args["mensagem"]
+
+        result = _execute_tool(tc.function.name, args)
 
         messages.append(msg)
-        for tc in msg.tool_calls:
-            args   = json.loads(tc.function.arguments)
-            result = _execute_tool(tc.function.name, args)
-            messages.append({
-                "role":         "tool",
-                "tool_call_id": tc.id,
-                "content":      result
-            })
+        messages.append({
+            "role":         "tool",
+            "tool_call_id": tc.id,
+            "content":      result
+        })
 
     return "Não consegui processar sua solicitação."
