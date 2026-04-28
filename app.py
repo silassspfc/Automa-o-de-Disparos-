@@ -1,6 +1,7 @@
 import os
+import re
 from flask import Flask, request, jsonify
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from services.supabase_client import client
 from services.whatsapp import GESTOR_NUMBER, AGENTE_AUTORIZADOS, _send
 from services.agent import process_gestor_message
@@ -9,6 +10,15 @@ from services.tally import achar
 app = Flask(__name__)
 
 TRAINING_LABELS = ("online", "prescencial", "presencial")
+
+
+def _extrair_data_do_nome(nome: str) -> str | None:
+    """Extrai data do nome do treinamento no formato 'DD.MM - ...' → 'YYYY-MM-DD'."""
+    match = re.match(r'^(\d{2})\.(\d{2})', nome.strip())
+    if match:
+        dia, mes = match.groups()
+        return f"{date.today().year}-{mes}-{dia}"
+    return None
 
 
 @app.route("/webhook/whatsapp", methods=["POST"])
@@ -123,8 +133,15 @@ def receive_treinamento():
             .limit(1)
             .execute()
         )
-        data_tr = cron.data[0]["data"] if cron.data else None
-        print(f"[TREINAMENTO] Data encontrada: {data_tr} para '{treinamento}'")
+        if cron.data:
+            data_tr = cron.data[0]["data"]
+        else:
+            data_tr = _extrair_data_do_nome(treinamento)
+            if data_tr:
+                print(f"[TREINAMENTO] Data extraída do nome: {data_tr} para '{treinamento}'")
+            else:
+                print(f"[TREINAMENTO] Data não encontrada para '{treinamento}'")
+        print(f"[TREINAMENTO] Data final: {data_tr} para '{treinamento}'")
 
         unidade_result = (
             client.table("unidades")
