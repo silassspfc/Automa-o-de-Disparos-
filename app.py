@@ -181,6 +181,18 @@ def _get_file_url(fields: list, keyword: str) -> str:
     return ""
 
 
+def _achar_checkboxes(fields: list, keyword: str) -> list[str]:
+    """Retorna textos selecionados de campo CHECKBOXES, ignorando campos expandidos."""
+    for f in fields:
+        if keyword.lower() not in f["label"].lower():
+            continue
+        if "(" in f["label"]:
+            continue
+        if f.get("type") == "CHECKBOXES" and isinstance(f.get("value"), list):
+            return [o["text"].strip() for o in f.get("options", []) if o["id"] in f["value"]]
+    return []
+
+
 @app.route("/webhook/candidatura", methods=["POST"])
 def receive_candidatura():
     """Recebe inscrição de candidato via Tally (formulário de currículo)."""
@@ -193,35 +205,41 @@ def receive_candidatura():
         nome     = achar(fields, "nome",     exclude_parens=True)
         telefone = achar(fields, "telefone", exclude_parens=True)
         email    = achar(fields, "email",    exclude_parens=True)
-        regiao   = achar(fields, "regiao",   exclude_parens=True) or achar(fields, "região", exclude_parens=True)
-        vaga_str = achar(fields, "vaga",     exclude_parens=True)
+        regioes  = _achar_checkboxes(fields, "região") or _achar_checkboxes(fields, "regiao")
+        regiao   = ", ".join(regioes) if regioes else achar(fields, "região", exclude_parens=True)
+        vagas    = _achar_checkboxes(fields, "vaga")
         cv_url   = _get_file_url(fields, "curriculo") or _get_file_url(fields, "currículo")
     else:
         nome     = payload.get("nome", "").strip()
         telefone = payload.get("telefone", "").strip()
         email    = payload.get("email", "").strip()
         regiao   = payload.get("regiao", "").strip()
-        vaga_str = payload.get("vaga", "").strip()
+        vagas    = [payload.get("vaga", "").strip()]
         cv_url   = payload.get("cv_url", "").strip()
 
-    if not nome or not vaga_str:
-        print(f"[CANDIDATURA] Campos ausentes — nome={nome} vaga={vaga_str}")
+    if not nome or not vagas:
+        print(f"[CANDIDATURA] Campos ausentes — nome={nome} vagas={vagas}")
         return jsonify({"error": "Campos obrigatórios: nome, vaga"}), 400
 
-    vaga_r  = client.table("vagas").select("id").ilike("titulo", f"%{vaga_str}%").limit(1).execute()
-    vaga_id = vaga_r.data[0]["id"] if vaga_r.data else None
+    ids_salvos = []
+    for vaga_str in vagas:
+        # ilike parcial: "Consultora de Vendas" bate em "Consultora", etc.
+        vaga_r  = client.table("vagas").select("id").ilike("titulo", f"%{vaga_str.split()[0]}%").limit(1).execute()
+        vaga_id = vaga_r.data[0]["id"] if vaga_r.data else None
 
-    record       = client.table("candidatos").insert({
-        "nome":     nome,
-        "telefone": telefone or None,
-        "email":    email or None,
-        "regiao":   regiao or None,
-        "vaga_id":  vaga_id,
-        "cv_url":   cv_url or None,
-    }).execute()
-    candidato_id = record.data[0]["id"]
-    print(f"[CANDIDATURA] Salvo: {nome} | vaga_id={vaga_id} | id={candidato_id}")
-    return jsonify({"ok": True, "id": candidato_id}), 200
+        record       = client.table("candidatos").insert({
+            "nome":     nome,
+            "telefone": telefone or None,
+            "email":    email or None,
+            "regiao":   regiao or None,
+            "vaga_id":  vaga_id,
+            "cv_url":   cv_url or None,
+        }).execute()
+        candidato_id = record.data[0]["id"]
+        ids_salvos.append(candidato_id)
+        print(f"[CANDIDATURA] Salvo: {nome} | vaga={vaga_str} | vaga_id={vaga_id} | id={candidato_id}")
+
+    return jsonify({"ok": True, "ids": ids_salvos}), 200
 
 
 @app.route("/webhook/comportamental", methods=["POST"])
