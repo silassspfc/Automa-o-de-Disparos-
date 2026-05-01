@@ -6,8 +6,9 @@ from datetime import date
 from services.supabase_client import client
 from services.whatsapp import GESTOR_NUMBER, AGENTE_AUTORIZADOS, _send
 from services.agent import process_gestor_message
-from services.tally import achar
+from services.tally import achar, achar_checkboxes
 from services.recrutamento import processar_comportamental
+from services.constants import CONFIRM_SENT, CONFIRM_CONFIRMED, CONFIRM_DECLINED
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,13 +60,13 @@ def receive_reply():
     if mensagem_upper not in ("SIM", "NÃO", "NAO"):
         return jsonify({"ok": True}), 200
 
-    status = "confirmed" if mensagem_upper == "SIM" else "declined"
+    status = CONFIRM_CONFIRMED if mensagem_upper == "SIM" else CONFIRM_DECLINED
 
     result = (
         client.table("treinamentos")
         .select("id")
         .eq("telefone_responsavel", telefone)
-        .eq("confirmacao_status", "sent")
+        .eq("confirmacao_status", CONFIRM_SENT)
         .execute()
     )
 
@@ -74,7 +75,7 @@ def receive_reply():
 
     client.table("treinamentos").update({
         "confirmacao_status": status
-    }).eq("telefone_responsavel", telefone).eq("confirmacao_status", "sent").execute()
+    }).eq("telefone_responsavel", telefone).eq("confirmacao_status", CONFIRM_SENT).execute()
 
     log.info(f"Confirmação: {telefone} respondeu {mensagem_upper} → {status} ({len(result.data)} inscrito(s))")
     return jsonify({"ok": True}), 200
@@ -132,6 +133,15 @@ def receive_treinamento():
         log.warning(f"Treinamento — campos ausentes: nome={nome} treinamentos={treinamentos_selecionados}")
         return jsonify({"error": "Campos obrigatórios ausentes: nome, treinamento"}), 400
 
+    unidade_result = (
+        client.table("unidades")
+        .select("telefone_responsavel")
+        .eq("nome", unidade)
+        .limit(1)
+        .execute()
+    )
+    telefone_responsavel = unidade_result.data[0]["telefone_responsavel"] if unidade_result.data else None
+
     ids_salvos = []
     for treinamento in treinamentos_selecionados:
         cron = (
@@ -151,14 +161,20 @@ def receive_treinamento():
                 log.warning(f"Treinamento — data não encontrada para '{treinamento}'")
         log.info(f"Treinamento — data final: {data_tr} para '{treinamento}'")
 
-        unidade_result = (
-            client.table("unidades")
-            .select("telefone_responsavel")
-            .eq("nome", unidade)
+        # Dedupe: ignora se já existe inscrição igual
+        existing = (
+            client.table("treinamentos")
+            .select("id")
+            .eq("nome", nome)
+            .eq("treinamento", treinamento)
+            .eq("data_treinamento", data_tr)
             .limit(1)
             .execute()
         )
-        telefone_responsavel = unidade_result.data[0]["telefone_responsavel"] if unidade_result.data else None
+        if existing.data:
+            log.info(f"Inscrição duplicada ignorada: {nome} | {treinamento} | {data_tr}")
+            ids_salvos.append(existing.data[0]["id"])
+            continue
 
         record = client.table("treinamentos").insert({
             "nome":                 nome,
@@ -188,17 +204,6 @@ def _get_file_url(fields: list, keyword: str) -> str:
     return ""
 
 
-def _achar_checkboxes(fields: list, keyword: str) -> list[str]:
-    """Retorna textos selecionados de campo CHECKBOXES, ignorando campos expandidos."""
-    for f in fields:
-        if keyword.lower() not in f["label"].lower():
-            continue
-        if "(" in f["label"]:
-            continue
-        if f.get("type") == "CHECKBOXES" and isinstance(f.get("value"), list):
-            return [o["text"].strip() for o in f.get("options", []) if o["id"] in f["value"]]
-    return []
-
 
 @app.route("/webhook/candidatura", methods=["POST"])
 def receive_candidatura():
@@ -212,9 +217,9 @@ def receive_candidatura():
         nome     = achar(fields, "nome",     exclude_parens=True)
         telefone = achar(fields, "telefone", exclude_parens=True)
         email    = achar(fields, "email",    exclude_parens=True)
-        regioes  = _achar_checkboxes(fields, "região") or _achar_checkboxes(fields, "regiao")
+        regioes  = achar_checkboxes(fields, "região") or achar_checkboxes(fields, "regiao")
         regiao   = ", ".join(regioes) if regioes else achar(fields, "região", exclude_parens=True)
-        vagas    = _achar_checkboxes(fields, "vaga")
+        vagas    = achar_checkboxes(fields, "vaga")
         cv_url   = _get_file_url(fields, "curriculo") or _get_file_url(fields, "currículo")
     else:
         nome     = payload.get("nome", "").strip()

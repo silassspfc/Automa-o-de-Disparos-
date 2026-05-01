@@ -9,6 +9,14 @@ from openai import OpenAI
 
 from services.supabase_client import client
 from services.whatsapp import _send
+from services.constants import (
+    OPENAI_MODEL,
+    STATUS_NOVO,
+    STATUS_ANALISADO,
+    STATUS_CONTATADO,
+    STATUS_COMPORTAMENTAL_RECEBIDO,
+    STATUS_ENCAMINHADO,
+)
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +109,7 @@ def ranking_candidatos(vaga: str) -> str:
             client.table("candidatos").update({
                 "ranking_score":   0,
                 "ranking_analise": "Currículo não disponível para análise.",
-                "status":          "analisado",
+                "status":          STATUS_ANALISADO,
             }).eq("id", c["id"]).execute()
             c["ranking_score"]   = 0
             c["ranking_analise"] = "Currículo não disponível para análise."
@@ -115,7 +123,7 @@ def ranking_candidatos(vaga: str) -> str:
         )
         try:
             resp    = openai.chat.completions.create(
-                model="gpt-4o",
+                model=OPENAI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
             )
@@ -128,7 +136,7 @@ def ranking_candidatos(vaga: str) -> str:
         client.table("candidatos").update({
             "ranking_score":   nota,
             "ranking_analise": analise,
-            "status":          "analisado",
+            "status":          STATUS_ANALISADO,
         }).eq("id", c["id"]).execute()
         c["ranking_score"]   = nota
         c["ranking_analise"] = analise
@@ -151,7 +159,18 @@ def contatar_candidato(candidato_id: int) -> str:
         return f"Candidato ID {candidato_id} não encontrado."
     if not c.get("telefone"):
         return f"{c['nome']} não tem telefone cadastrado."
-    if c.get("status") == "contatado":
+
+    status_anterior = c.get("status") or STATUS_NOVO
+
+    # Marca como contatado atomicamente: só atualiza se ainda não estiver
+    update_result = (
+        client.table("candidatos")
+        .update({"status": STATUS_CONTATADO})
+        .eq("id", candidato_id)
+        .neq("status", STATUS_CONTATADO)
+        .execute()
+    )
+    if not update_result.data:
         return f"{c['nome']} já foi contatado anteriormente."
 
     vaga_titulo = (c.get("vagas") or {}).get("titulo") or "nossa vaga"
@@ -167,9 +186,11 @@ def contatar_candidato(candidato_id: int) -> str:
 
     try:
         _send(c["telefone"], mensagem)
-        client.table("candidatos").update({"status": "contatado"}).eq("id", candidato_id).execute()
         return f"Mensagem enviada para {c['nome']} ({c['telefone']}). Status: contatado."
     except Exception as e:
+        # Rollback: envio falhou, volta o status anterior
+        client.table("candidatos").update({"status": status_anterior}).eq("id", candidato_id).execute()
+        log.error(f"Erro ao enviar WhatsApp para {c['nome']} ({c['telefone']}): {e}")
         return f"Erro ao contatar {c['nome']}: {e}"
 
 
@@ -202,7 +223,7 @@ def encaminhar_franqueado(candidato_id: int) -> str:
 
     try:
         _send(GRUPO_FRANQUEADOS, mensagem)
-        client.table("candidatos").update({"status": "encaminhado"}).eq("id", candidato_id).execute()
+        client.table("candidatos").update({"status": STATUS_ENCAMINHADO}).eq("id", candidato_id).execute()
         return f"{c['nome']} encaminhado para o grupo dos franqueados."
     except Exception as e:
         return f"Erro ao encaminhar {c['nome']}: {e}"
@@ -213,7 +234,7 @@ def encaminhar_franqueado(candidato_id: int) -> str:
 def processar_comportamental(candidato_id: int, respostas: dict) -> None:
     client.table("candidatos").update({
         "comportamental_respostas": respostas,
-        "status":                   "comportamental_recebido",
+        "status":                   STATUS_COMPORTAMENTAL_RECEBIDO,
     }).eq("id", candidato_id).execute()
 
     vaga_r      = client.table("candidatos").select("vagas(titulo)").eq("id", candidato_id).limit(1).execute()
@@ -235,7 +256,7 @@ def processar_comportamental(candidato_id: int, respostas: dict) -> None:
     try:
         openai = _get_openai()
         resp   = openai.chat.completions.create(
-            model="gpt-4o",
+            model=OPENAI_MODEL,
             messages=[{"role": "user", "content": prompt}],
         )
         perfil = resp.choices[0].message.content.strip()

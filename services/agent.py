@@ -21,6 +21,7 @@ from services.recrutamento import (
     contatar_candidato,
     encaminhar_franqueado,
 )
+from services.constants import OPENAI_MODEL
 
 
 def _get_openai_client():
@@ -269,7 +270,7 @@ def process_gestor_message(mensagem: str) -> str:
 
     for _ in range(5):
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model=OPENAI_MODEL,
             messages=messages,
             tools=TOOLS,
             tool_choice="required"

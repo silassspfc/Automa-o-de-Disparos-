@@ -2,6 +2,7 @@ import logging
 from datetime import date, datetime
 from services.supabase_client import client
 from services.whatsapp import _send
+from services.constants import CONFIRM_SENT, CONFIRM_CONFIRMED, CONFIRM_DECLINED
 
 log = logging.getLogger(__name__)
 
@@ -196,7 +197,7 @@ def confirmar_presenca(data: str) -> str:
             _send(telefone, mensagem)
             for rid in dados["ids"]:
                 client.table("treinamentos").update({
-                    "confirmacao_status": "sent"
+                    "confirmacao_status": CONFIRM_SENT
                 }).eq("id", rid).execute()
             enviados.append(f"{unidade} ({len(dados['nomes'])} pessoa(s))")
             log.info(f"Confirmação enviada para {unidade} ({telefone})")
@@ -222,16 +223,16 @@ def relatorio_confirmacoes(data: str) -> str:
         client.table("treinamentos")
         .select("nome, unidade, treinamento, confirmacao_status")
         .eq("data_treinamento", data)
-        .in_("confirmacao_status", ["sent", "confirmed", "declined"])
+        .in_("confirmacao_status", [CONFIRM_SENT, CONFIRM_CONFIRMED, CONFIRM_DECLINED])
         .execute()
     )
     registros = result.data or []
     if not registros:
         return f"Nenhuma confirmação enviada para {data}."
 
-    confirmados = [r for r in registros if r["confirmacao_status"] == "confirmed"]
-    recusados   = [r for r in registros if r["confirmacao_status"] == "declined"]
-    pendentes   = [r for r in registros if r["confirmacao_status"] == "sent"]
+    confirmados = [r for r in registros if r["confirmacao_status"] == CONFIRM_CONFIRMED]
+    recusados   = [r for r in registros if r["confirmacao_status"] == CONFIRM_DECLINED]
+    pendentes   = [r for r in registros if r["confirmacao_status"] == CONFIRM_SENT]
 
     linhas = [f"Confirmações — {_fmt_data(data)}"]
     if confirmados:
