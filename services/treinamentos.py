@@ -98,7 +98,7 @@ def buscar_inscritos(data: str) -> str:
 def buscar_medicos(data: str) -> str:
     result = (
         client.table("treinamentos")
-        .select("nome, unidade, crm, treinamento")
+        .select("id, nome, unidade, crm, treinamento")
         .eq("data_treinamento", data)
         .eq("arquivado", False)
         .execute()
@@ -113,7 +113,7 @@ def buscar_medicos(data: str) -> str:
 
     if not medicos:
         return f"Nenhum médico inscrito para {data}."
-    linhas = [f"{r['unidade']}, {r['nome']}, CRM: {r['crm']}" for r in medicos]
+    linhas = [f"{r['unidade']}, {r['nome']}, CRM: {r['crm']} [ID: {r['id']}]" for r in medicos]
     return f"{len(medicos)} médico(s) inscrito(s):\n" + "\n".join(linhas)
 
 
