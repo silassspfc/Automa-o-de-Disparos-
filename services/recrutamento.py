@@ -303,7 +303,7 @@ def processar_comportamental(candidato_id: int, respostas: dict) -> None:
     log.info(f"Comportamental — análise salva para candidato {candidato_id}")
 
 
-def arquivar_registro(tipo: str, id: int) -> str:
+def arquivar_registro(tipo: str, id: str) -> str:
     tabela = "candidatos" if tipo == "candidato" else "treinamentos"
     r = client.table(tabela).update({"arquivado": True}).eq("id", id).execute()
     if not r.data:

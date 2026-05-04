@@ -65,7 +65,7 @@ def listar_treinamentos() -> str:
 def buscar_inscritos(data: str) -> str:
     result = (
         client.table("treinamentos")
-        .select("nome, unidade, treinamento")
+        .select("id, nome, unidade, treinamento")
         .eq("data_treinamento", data)
         .eq("arquivado", False)
         .execute()
@@ -74,7 +74,7 @@ def buscar_inscritos(data: str) -> str:
     if not todos:
         return f"Nenhum inscrito para {data}."
 
-    # 1 registro por (treinamento, nome)
+    # 1 registro por (treinamento, nome) — mantém o primeiro id encontrado
     vistos: set[tuple] = set()
     registros = []
     for r in todos:
@@ -85,7 +85,7 @@ def buscar_inscritos(data: str) -> str:
 
     grupos = {}
     for r in registros:
-        grupos.setdefault(r["treinamento"], []).append(f"{r['unidade']} - {r['nome']}")
+        grupos.setdefault(r["treinamento"], []).append(f"{r['unidade']} - {r['nome']} [ID: {r['id']}]")
 
     linhas = [
         f"{tr}:\n" + "\n".join(f"  {p}" for p in pessoas)

@@ -214,7 +214,7 @@ TOOLS = [
                         "enum": ["candidato", "inscricao"],
                         "description": "'candidato' para arquivar da tabela de candidatos, 'inscricao' para arquivar uma inscrição de treinamento"
                     },
-                    "id": {"type": "integer", "description": "ID do registro a arquivar"}
+                    "id": {"type": "string", "description": "ID (UUID) do registro a arquivar, exatamente como exibido na listagem"}
                 },
                 "required": ["tipo", "id"]
             }
@@ -265,7 +265,7 @@ _TOOL_HANDLERS = {
     "ranking_candidatos":                 lambda a: ranking_candidatos(a["vaga"]),
     "contatar_candidato":                 lambda a: contatar_candidato(int(a["candidato_id"])),
     "encaminhar_franqueado":              lambda a: encaminhar_franqueado(int(a["candidato_id"])),
-    "arquivar_registro":                  lambda a: arquivar_registro(a["tipo"], int(a["id"])),
+    "arquivar_registro":                  lambda a: arquivar_registro(a["tipo"], a["id"]),
 }
 
 
