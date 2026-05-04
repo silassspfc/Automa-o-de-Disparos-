@@ -303,12 +303,38 @@ def processar_comportamental(candidato_id: int, respostas: dict) -> None:
     log.info(f"Comportamental — análise salva para candidato {candidato_id}")
 
 
-def arquivar_registro(tipo: str, id: str) -> str:
+def arquivar_registro(tipo: str, nome: str) -> str:
     tabela = "candidatos" if tipo == "candidato" else "treinamentos"
-    r = client.table(tabela).update({"arquivado": True}).eq("id", id).execute()
+    r = client.table(tabela).update({"arquivado": True}).eq("arquivado", False).ilike("nome", f"%{nome}%").execute()
     if not r.data:
-        label = "Candidato" if tipo == "candidato" else "Inscrição"
-        return f"{label} ID {id} não encontrado."
-    label = "Candidato" if tipo == "candidato" else "Inscrição"
-    log.info(f"{label} ID {id} arquivado(a)")
-    return f"{label} ID {id} arquivado(a) com sucesso."
+        label = "candidato" if tipo == "candidato" else "inscrição"
+        return f"Nenhum {label} encontrado com nome '{nome}'."
+    label = "candidato(s)" if tipo == "candidato" else "inscrição(ões)"
+    detalhes = _resumo_registros(tipo, r.data)
+    log.info(f"Arquivado(s) por nome '{nome}': {len(r.data)} registro(s)")
+    return f"{len(r.data)} {label} arquivado(s):\n{detalhes}"
+
+
+def reativar_registro(tipo: str, nome: str) -> str:
+    tabela = "candidatos" if tipo == "candidato" else "treinamentos"
+    r = client.table(tabela).update({"arquivado": False}).eq("arquivado", True).ilike("nome", f"%{nome}%").execute()
+    if not r.data:
+        label = "candidato" if tipo == "candidato" else "inscrição"
+        return f"Nenhum {label} arquivado encontrado com nome '{nome}'."
+    label = "candidato(s)" if tipo == "candidato" else "inscrição(ões)"
+    detalhes = _resumo_registros(tipo, r.data)
+    log.info(f"Reativado(s) por nome '{nome}': {len(r.data)} registro(s)")
+    return f"{len(r.data)} {label} reativado(s):\n{detalhes}"
+
+
+def _resumo_registros(tipo: str, registros: list) -> str:
+    linhas = []
+    for r in registros:
+        if tipo == "candidato":
+            vaga = (r.get("vagas") or {}).get("titulo") or r.get("vaga_id") or "—"
+            linhas.append(f"  • {r['nome']} | vaga: {vaga}")
+        else:
+            unidade = r.get("unidade") or "—"
+            treinamento = r.get("treinamento") or "—"
+            linhas.append(f"  • {r['nome']} | {unidade} | {treinamento}")
+    return "\n".join(linhas)
