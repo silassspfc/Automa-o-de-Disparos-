@@ -20,6 +20,7 @@ from services.recrutamento import (
     ranking_candidatos,
     contatar_candidato,
     encaminhar_franqueado,
+    arquivar_registro,
 )
 from services.constants import OPENAI_MODEL
 
@@ -203,6 +204,25 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "arquivar_registro",
+            "description": "Arquiva (soft delete) um candidato ou uma inscrição de treinamento. O registro fica invisível mas não é apagado do banco. Usar quando o gestor pedir para remover, arquivar ou excluir um candidato ou inscrito.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["candidato", "inscricao"],
+                        "description": "'candidato' para arquivar da tabela de candidatos, 'inscricao' para arquivar uma inscrição de treinamento"
+                    },
+                    "id": {"type": "integer", "description": "ID do registro a arquivar"}
+                },
+                "required": ["tipo", "id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "encaminhar_franqueado",
             "description": "Envia para o grupo dos franqueados o perfil completo do candidato: nota de compatibilidade, análise do currículo, perfil comportamental e link do PDF. Usar somente após autorização do gestor.",
             "parameters": {
@@ -229,6 +249,7 @@ _DISPLAY_TOOLS = {
     "ranking_candidatos",
     "contatar_candidato",
     "encaminhar_franqueado",
+    "arquivar_registro",
 }
 
 # Mapeamento tool_name → handler; adicionar uma tool nova = uma linha aqui
@@ -244,6 +265,7 @@ _TOOL_HANDLERS = {
     "ranking_candidatos":                 lambda a: ranking_candidatos(a["vaga"]),
     "contatar_candidato":                 lambda a: contatar_candidato(int(a["candidato_id"])),
     "encaminhar_franqueado":              lambda a: encaminhar_franqueado(int(a["candidato_id"])),
+    "arquivar_registro":                  lambda a: arquivar_registro(a["tipo"], int(a["id"])),
 }
 
 

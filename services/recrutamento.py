@@ -64,6 +64,83 @@ def _get_candidato(candidato_id: int) -> dict | None:
     return r.data[0] if r.data else None
 
 
+# --- análise de candidatos ---
+
+def _analisar_candidato(c: dict, vaga_titulo: str, descricao: str, openai) -> None:
+    """Analisa um candidato via GPT e salva score. Modifica c in-place."""
+    texto = c.get("cv_texto") or ""
+    if not texto and c.get("cv_url"):
+        texto = _extrair_texto_pdf(c["cv_url"])
+        if texto:
+            client.table("candidatos").update({"cv_texto": texto}).eq("id", c["id"]).execute()
+
+    if not texto:
+        client.table("candidatos").update({
+            "ranking_score":   0,
+            "ranking_analise": "Currículo não disponível para análise.",
+            "status":          STATUS_ANALISADO,
+        }).eq("id", c["id"]).execute()
+        c["ranking_score"]   = 0
+        c["ranking_analise"] = "Currículo não disponível para análise."
+        return
+
+    prompt = (
+        f"Você é um recrutador especialista em estética. Analise o currículo para a vaga de {vaga_titulo}.\n\n"
+        f"Vaga: {descricao}\n\n"
+        f"Currículo:\n{texto[:4000]}\n\n"
+        f'Responda em JSON: {{"nota": 0-10, "analise": "2 linhas: 1 ponto forte e 1 lacuna em relação à vaga"}}'
+    )
+    try:
+        resp    = openai.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        data    = json.loads(resp.choices[0].message.content)
+        nota    = float(data.get("nota", 0))
+        analise = str(data.get("analise", ""))
+    except Exception as e:
+        nota, analise = 0.0, f"Erro na análise: {e}"
+
+    client.table("candidatos").update({
+        "ranking_score":   nota,
+        "ranking_analise": analise,
+        "status":          STATUS_ANALISADO,
+    }).eq("id", c["id"]).execute()
+    c["ranking_score"]   = nota
+    c["ranking_analise"] = analise
+
+
+def analisar_lote_vaga(vaga_id: int) -> None:
+    """Analisa todos os candidatos sem score de uma vaga. Chamado em background."""
+    try:
+        vaga_r = client.table("vagas").select("titulo, descricao, requisitos").eq("id", vaga_id).limit(1).execute()
+        if not vaga_r.data:
+            return
+        v           = vaga_r.data[0]
+        vaga_titulo = v["titulo"]
+        descricao   = f"{v['descricao']} Requisitos: {v['requisitos']}"
+
+        pendentes = (
+            client.table("candidatos")
+            .select("id, nome, cv_url, cv_texto")
+            .eq("vaga_id", vaga_id)
+            .is_("ranking_score", "null")
+            .eq("arquivado", False)
+            .execute()
+        ).data or []
+
+        if not pendentes:
+            return
+
+        openai = _get_openai()
+        for c in pendentes:
+            _analisar_candidato(c, vaga_titulo, descricao, openai)
+        log.info(f"Lote analisado: {len(pendentes)} candidato(s) para vaga {vaga_titulo}")
+    except Exception as e:
+        log.error(f"Erro na análise em lote (vaga_id={vaga_id}): {e}")
+
+
 # --- tools do agente ---
 
 def ranking_candidatos(vaga: str) -> str:
@@ -86,6 +163,7 @@ def ranking_candidatos(vaga: str) -> str:
         client.table("candidatos")
         .select("id, nome, regiao, cv_url, cv_texto, ranking_score, ranking_analise, status")
         .eq("vaga_id", vaga_id)
+        .eq("arquivado", False)
         .order("created_at")
         .execute()
     ).data or []
@@ -94,55 +172,13 @@ def ranking_candidatos(vaga: str) -> str:
         return f"Nenhum candidato inscrito para a vaga {vaga_titulo}."
 
     openai = _get_openai()
-
     for c in todos:
         if c.get("ranking_score") is not None:
             continue
-
-        texto = c.get("cv_texto") or ""
-        if not texto and c.get("cv_url"):
-            texto = _extrair_texto_pdf(c["cv_url"])
-            if texto:
-                client.table("candidatos").update({"cv_texto": texto}).eq("id", c["id"]).execute()
-
-        if not texto:
-            client.table("candidatos").update({
-                "ranking_score":   0,
-                "ranking_analise": "Currículo não disponível para análise.",
-                "status":          STATUS_ANALISADO,
-            }).eq("id", c["id"]).execute()
-            c["ranking_score"]   = 0
-            c["ranking_analise"] = "Currículo não disponível para análise."
-            continue
-
-        prompt = (
-            f"Você é um recrutador especialista em estética. Analise o currículo para a vaga de {vaga_titulo}.\n\n"
-            f"Vaga: {descricao}\n\n"
-            f"Currículo:\n{texto[:4000]}\n\n"
-            f'Responda em JSON: {{"nota": 0-10, "analise": "2 linhas: 1 ponto forte e 1 lacuna em relação à vaga"}}'
-        )
-        try:
-            resp    = openai.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-            )
-            data    = json.loads(resp.choices[0].message.content)
-            nota    = float(data.get("nota", 0))
-            analise = str(data.get("analise", ""))
-        except Exception as e:
-            nota, analise = 0.0, f"Erro na análise: {e}"
-
-        client.table("candidatos").update({
-            "ranking_score":   nota,
-            "ranking_analise": analise,
-            "status":          STATUS_ANALISADO,
-        }).eq("id", c["id"]).execute()
-        c["ranking_score"]   = nota
-        c["ranking_analise"] = analise
+        _analisar_candidato(c, vaga_titulo, descricao, openai)
 
     todos.sort(key=lambda x: x.get("ranking_score") or 0, reverse=True)
-    top = todos[:5]
+    top = todos[:10]
 
     linhas = [f"Ranking — {vaga_titulo} (top {len(top)} de {len(todos)} candidato(s))\n"]
     for i, c in enumerate(top, 1):
@@ -265,3 +301,14 @@ def processar_comportamental(candidato_id: int, respostas: dict) -> None:
 
     client.table("candidatos").update({"comportamental_perfil": perfil}).eq("id", candidato_id).execute()
     log.info(f"Comportamental — análise salva para candidato {candidato_id}")
+
+
+def arquivar_registro(tipo: str, id: int) -> str:
+    tabela = "candidatos" if tipo == "candidato" else "treinamentos"
+    r = client.table(tabela).update({"arquivado": True}).eq("id", id).execute()
+    if not r.data:
+        label = "Candidato" if tipo == "candidato" else "Inscrição"
+        return f"{label} ID {id} não encontrado."
+    label = "Candidato" if tipo == "candidato" else "Inscrição"
+    log.info(f"{label} ID {id} arquivado(a)")
+    return f"{label} ID {id} arquivado(a) com sucesso."

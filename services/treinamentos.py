@@ -29,12 +29,14 @@ def _get_presenciais(data: str) -> list[str]:
 
 def _montar_mensagem_ativacao(r: dict) -> str:
     nome_tr  = r["treinamento"]
+    data_fmt = _fmt_data(r.get("data") or "")
     link     = r.get("link_inscricao") or ""
     mensagem = r.get("mensagem_customizada") or (
         f"Boa tarde, rede Onodera!\n"
         f"Passando para reforçar a participação no *{nome_tr}*!\n"
         f"Contamos com a presença de vocês!"
     )
+    mensagem = mensagem.replace("{treinamento}", nome_tr).replace("{data}", data_fmt)
     if link:
         mensagem += f"\n\nInscrições: {link}"
     return mensagem
@@ -65,6 +67,7 @@ def buscar_inscritos(data: str) -> str:
         client.table("treinamentos")
         .select("nome, unidade, treinamento")
         .eq("data_treinamento", data)
+        .eq("arquivado", False)
         .execute()
     )
     todos = result.data or []
@@ -97,6 +100,7 @@ def buscar_medicos(data: str) -> str:
         client.table("treinamentos")
         .select("nome, unidade, crm, treinamento")
         .eq("data_treinamento", data)
+        .eq("arquivado", False)
         .execute()
     )
     todos = [r for r in (result.data or []) if r.get("crm")]
@@ -126,6 +130,7 @@ def preview_confirmacao(data: str) -> str:
         .eq("data_treinamento", data)
         .in_("treinamento", presenciais)
         .is_("confirmacao_status", "null")
+        .eq("arquivado", False)
         .execute()
     )
     registros = result.data or []
@@ -133,9 +138,14 @@ def preview_confirmacao(data: str) -> str:
         return f"Nenhum inscrito pendente de confirmação para {data}."
 
     grupos, sem_telefone = {}, []
+    vistos: set[tuple] = set()
     for r in registros:
+        chave = (r.get("unidade") or "Sem unidade", r["nome"])
+        if chave in vistos:
+            continue
+        vistos.add(chave)
         telefone = r.get("telefone_responsavel") or ""
-        unidade  = r.get("unidade") or "Sem unidade"
+        unidade  = chave[0]
         if not telefone:
             sem_telefone.append(f"{unidade} — {r['nome']}")
             continue
@@ -163,6 +173,7 @@ def confirmar_presenca(data: str) -> str:
         .eq("data_treinamento", data)
         .in_("treinamento", presenciais)
         .is_("confirmacao_status", "null")
+        .eq("arquivado", False)
         .execute()
     )
     registros = result.data or []
@@ -170,16 +181,22 @@ def confirmar_presenca(data: str) -> str:
         return f"Nenhum inscrito pendente de confirmação para {data}."
 
     grupos, sem_telefone = {}, []
+    nomes_vistos: set[tuple] = set()
     for r in registros:
         telefone = r.get("telefone_responsavel") or ""
         unidade  = r.get("unidade") or "Sem unidade"
+        chave_display = (unidade, r["nome"])
         if not telefone:
-            sem_telefone.append(r["nome"])
+            if chave_display not in nomes_vistos:
+                nomes_vistos.add(chave_display)
+                sem_telefone.append(r["nome"])
             continue
         chave = (unidade, telefone)
         grupos.setdefault(chave, {"nomes": [], "ids": []})
-        grupos[chave]["nomes"].append(r["nome"])
         grupos[chave]["ids"].append(r["id"])
+        if chave_display not in nomes_vistos:
+            nomes_vistos.add(chave_display)
+            grupos[chave]["nomes"].append(r["nome"])
 
     data_fmt       = _fmt_data(data)
     enviados, erros = [], []
@@ -250,7 +267,7 @@ def relatorio_confirmacoes(data: str) -> str:
 def preview_ativacao(data: str) -> str:
     cron = (
         client.table("cronograma")
-        .select("treinamento, link_inscricao, numero_grupo, mensagem_customizada")
+        .select("data, treinamento, link_inscricao, numero_grupo, mensagem_customizada")
         .eq("data", data)
         .neq("tipo", "online")
         .execute()
@@ -275,7 +292,7 @@ def preview_ativacao(data: str) -> str:
 def ativar_treinamento(data: str) -> str:
     cron = (
         client.table("cronograma")
-        .select("treinamento, link_inscricao, numero_grupo, mensagem_customizada")
+        .select("data, treinamento, link_inscricao, numero_grupo, mensagem_customizada")
         .eq("data", data)
         .neq("tipo", "online")
         .execute()
