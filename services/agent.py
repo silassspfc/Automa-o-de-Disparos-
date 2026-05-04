@@ -20,6 +20,7 @@ from services.recrutamento import (
     ranking_candidatos,
     contatar_candidato,
     encaminhar_franqueado,
+    preview_arquivamento,
     arquivar_registro,
     reativar_registro,
 )
@@ -53,8 +54,11 @@ Fluxo obrigatório para recrutamento:
 2. Quando o gestor validar o ranking e pedir para contatar um candidato → use contatar_candidato com o ID informado.
 3. Quando o gestor autorizar o encaminhamento de um candidato para os franqueados → use encaminhar_franqueado com o ID informado.
 
-Arquivamento e reativação:
-- Para arquivar candidatos ou inscrições → use arquivar_registro com o nome da pessoa.
+Fluxo obrigatório para arquivamento:
+1. Quando o gestor pedir para arquivar/remover/excluir um candidato ou inscrição → use PRIMEIRO preview_arquivamento para mostrar os registros encontrados e perguntar qual remover.
+2. Somente após o gestor especificar o treinamento/unidade ou dizer "todos" → use arquivar_registro para arquivar.
+
+Reativação:
 - Para desfazer um arquivamento → use reativar_registro com o nome da pessoa."""
 
 TOOLS = [
@@ -209,8 +213,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "preview_arquivamento",
+            "description": "Mostra ao gestor quais registros serão afetados antes de arquivar. Usar SEMPRE como primeiro passo quando o gestor pedir para arquivar, remover ou excluir um candidato ou inscrição.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["candidato", "inscricao"],
+                        "description": "'candidato' para buscar na tabela de candidatos, 'inscricao' para buscar inscrições de treinamento"
+                    },
+                    "nome": {"type": "string", "description": "Nome (ou parte do nome) da pessoa a buscar"}
+                },
+                "required": ["tipo", "nome"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "arquivar_registro",
-            "description": "Arquiva (soft delete) candidatos ou inscrições de treinamento pelo nome. O registro fica invisível mas não é apagado do banco. Usar quando o gestor pedir para remover, arquivar ou excluir.",
+            "description": "Arquiva (soft delete) candidatos ou inscrições pelo nome. Usar SOMENTE após o gestor confirmar o preview e especificar o que remover.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -219,7 +242,8 @@ TOOLS = [
                         "enum": ["candidato", "inscricao"],
                         "description": "'candidato' para arquivar da tabela de candidatos, 'inscricao' para arquivar inscrições de treinamento"
                     },
-                    "nome": {"type": "string", "description": "Nome (ou parte do nome) da pessoa a arquivar"}
+                    "nome": {"type": "string", "description": "Nome (ou parte do nome) da pessoa a arquivar"},
+                    "treinamento": {"type": "string", "description": "Filtro opcional: nome (ou parte) do treinamento específico a arquivar. Omitir para arquivar todos os registros do nome."}
                 },
                 "required": ["tipo", "nome"]
             }
@@ -273,6 +297,7 @@ _DISPLAY_TOOLS = {
     "ranking_candidatos",
     "contatar_candidato",
     "encaminhar_franqueado",
+    "preview_arquivamento",
     "arquivar_registro",
     "reativar_registro",
 }
@@ -290,7 +315,8 @@ _TOOL_HANDLERS = {
     "ranking_candidatos":                 lambda a: ranking_candidatos(a["vaga"]),
     "contatar_candidato":                 lambda a: contatar_candidato(int(a["candidato_id"])),
     "encaminhar_franqueado":              lambda a: encaminhar_franqueado(int(a["candidato_id"])),
-    "arquivar_registro":                  lambda a: arquivar_registro(a["tipo"], a["nome"]),
+    "preview_arquivamento":               lambda a: preview_arquivamento(a["tipo"], a["nome"]),
+    "arquivar_registro":                  lambda a: arquivar_registro(a["tipo"], a["nome"], a.get("treinamento")),
     "reativar_registro":                  lambda a: reativar_registro(a["tipo"], a["nome"]),
 }
 

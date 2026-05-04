@@ -303,9 +303,28 @@ def processar_comportamental(candidato_id: int, respostas: dict) -> None:
     log.info(f"Comportamental — análise salva para candidato {candidato_id}")
 
 
-def arquivar_registro(tipo: str, nome: str) -> str:
+def preview_arquivamento(tipo: str, nome: str) -> str:
     tabela = "candidatos" if tipo == "candidato" else "treinamentos"
-    r = client.table(tabela).update({"arquivado": True}).eq("arquivado", False).ilike("nome", f"%{nome}%").execute()
+    campos = "nome, regiao, vagas(titulo)" if tipo == "candidato" else "nome, unidade, treinamento"
+    r = client.table(tabela).select(campos).eq("arquivado", False).ilike("nome", f"%{nome}%").execute()
+    registros = r.data or []
+    if not registros:
+        label = "candidato" if tipo == "candidato" else "inscrição"
+        return f"Nenhum {label} encontrado com nome '{nome}'."
+    detalhes = _resumo_registros(tipo, registros)
+    label = "candidato(s)" if tipo == "candidato" else "inscrição(ões)"
+    return (
+        f"Encontrei {len(registros)} {label} com nome '{nome}':\n{detalhes}\n\n"
+        f"Qual deseja arquivar? Informe o treinamento (ou unidade) específico, ou diga 'todos'."
+    )
+
+
+def arquivar_registro(tipo: str, nome: str, treinamento: str | None = None) -> str:
+    tabela = "candidatos" if tipo == "candidato" else "treinamentos"
+    query = client.table(tabela).update({"arquivado": True}).eq("arquivado", False).ilike("nome", f"%{nome}%")
+    if treinamento and tipo == "inscricao":
+        query = query.ilike("treinamento", f"%{treinamento}%")
+    r = query.execute()
     if not r.data:
         label = "candidato" if tipo == "candidato" else "inscrição"
         return f"Nenhum {label} encontrado com nome '{nome}'."

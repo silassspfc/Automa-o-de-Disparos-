@@ -65,7 +65,7 @@ def listar_treinamentos() -> str:
 def buscar_inscritos(data: str) -> str:
     result = (
         client.table("treinamentos")
-        .select("id, nome, unidade, treinamento")
+        .select("nome, unidade, treinamento")
         .eq("data_treinamento", data)
         .eq("arquivado", False)
         .execute()
@@ -74,7 +74,6 @@ def buscar_inscritos(data: str) -> str:
     if not todos:
         return f"Nenhum inscrito para {data}."
 
-    # 1 registro por (treinamento, nome) — mantém o primeiro id encontrado
     vistos: set[tuple] = set()
     registros = []
     for r in todos:
@@ -85,7 +84,7 @@ def buscar_inscritos(data: str) -> str:
 
     grupos = {}
     for r in registros:
-        grupos.setdefault(r["treinamento"], []).append(f"{r['unidade']} - {r['nome']} [ID: {r['id']}]")
+        grupos.setdefault(r["treinamento"], []).append(f"{r['unidade']} - {r['nome']}")
 
     linhas = [
         f"{tr}:\n" + "\n".join(f"  {p}" for p in pessoas)
@@ -98,13 +97,12 @@ def buscar_inscritos(data: str) -> str:
 def buscar_medicos(data: str) -> str:
     result = (
         client.table("treinamentos")
-        .select("id, nome, unidade, crm, treinamento")
+        .select("nome, unidade, crm, treinamento")
         .eq("data_treinamento", data)
         .eq("arquivado", False)
         .execute()
     )
     todos = [r for r in (result.data or []) if r.get("crm")]
-    # 1 registro por CRM — mantém o primeiro encontrado
     vistos: dict[str, dict] = {}
     for r in todos:
         if r["crm"] not in vistos:
@@ -113,7 +111,7 @@ def buscar_medicos(data: str) -> str:
 
     if not medicos:
         return f"Nenhum médico inscrito para {data}."
-    linhas = [f"{r['unidade']}, {r['nome']}, CRM: {r['crm']} [ID: {r['id']}]" for r in medicos]
+    linhas = [f"{r['unidade']}, {r['nome']}, CRM: {r['crm']}" for r in medicos]
     return f"{len(medicos)} médico(s) inscrito(s):\n" + "\n".join(linhas)
 
 
